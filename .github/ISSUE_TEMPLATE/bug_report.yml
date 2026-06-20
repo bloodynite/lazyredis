@@ -1,0 +1,34 @@
+name: Bug report
+description: Report something that is broken
+title: "[bug]: "
+labels: ["bug"]
+body:
+  - type: textarea
+    id: description
+    attributes:
+      label: What happened?
+      description: Describe the bug and what you expected instead.
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Steps to reproduce
+      description: Commands, profile settings, or key sequence to trigger the issue.
+      placeholder: |
+        1. Connect to profile ...
+        2. Press ...
+        3. See error ...
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: lazyredis version
+      placeholder: v0.0.3 or commit hash
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: OS, terminal emulator, Redis mode (standalone/sentinel/cluster).
+      placeholder: Linux, foot, Redis 7.4 standalone

@@ -59,6 +59,18 @@ go build -o lazyredis ./cmd/lazyredis
 
 On first launch, a default config is created at `~/.config/lazyredis/profiles.yaml`.
 
+## Contributing
+
+Contributions are welcome. See [CONTRIBUTING.md](CONTRIBUTING.md).
+
+- Default branch for releases: `main`
+- Integration branch: `develop`
+- Open PRs against `develop` unless it is a hotfix for `main`
+
+## License
+
+MIT — see [LICENSE](LICENSE).
+
 ## Configuration
 
 Config path: `~/.config/lazyredis/profiles.yaml`
@@ -410,7 +422,3 @@ Skip integration tests in short mode:
 ```bash
 go test -short ./...
 ```
-
-## License
-
-See repository license file if present.
