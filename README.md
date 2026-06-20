@@ -39,7 +39,7 @@ Edit key modal with TTL, type, and value fields:
 From a release tag:
 
 ```bash
-go install github.com/bloodynite/lazyredis/cmd/lazyredis@v0.0.4
+go install github.com/bloodynite/lazyredis/cmd/lazyredis@v0.0.5
 ```
 
 Then run:
