@@ -40,15 +40,15 @@ func TestKeybarWhenEditing(t *testing.T) {
 	if len(binds) != 6 {
 		t.Fatalf("expected new key binds, got %d", len(binds))
 	}
-	foundCtrlEnter := false
+	foundCtrlS := false
 	for _, b := range binds {
-		if b.Key == "ctrl+enter" {
-			foundCtrlEnter = true
+		if strings.Contains(b.Key, "ctrl+s") {
+			foundCtrlS = true
 			break
 		}
 	}
-	if !foundCtrlEnter {
-		t.Fatal("expected ctrl+enter save bind")
+	if !foundCtrlS {
+		t.Fatal("expected ctrl+s save bind")
 	}
 }
 

@@ -74,7 +74,7 @@ var defaultKeyMap = map[string][]string{
 
 	actionFormTab:      {"tab"},
 	actionFormShiftTab: {"shift+tab"},
-	actionFormEnter:    {"enter"},
+	actionFormEnter:    {"ctrl+s", "enter"},
 	actionFormEsc:      {"esc"},
 
 	actionBrowserDisconnect:   {"q"},
@@ -97,9 +97,9 @@ var defaultKeyMap = map[string][]string{
 	actionBrowserFilterApply:  {"enter"},
 	actionBrowserFilterCancel: {"esc"},
 
-	actionEditEnter:     {"enter"},
+	actionEditEnter:     {"ctrl+s", "enter"},
 	actionEditEsc:       {"esc"},
-	actionEditCtrlEnter: {"ctrl+enter"},
+	actionEditCtrlEnter: {"ctrl+s", "ctrl+enter"},
 	actionEditTab:       {"tab"},
 	actionEditShiftTab:  {"shift+tab"},
 
@@ -206,6 +206,44 @@ func (m *Model) bindEntry(id, desc string) keyBind {
 		Key:  formatBindKeys(m.bindKeys(id)),
 		Desc: desc,
 	}
+}
+
+func (m *Model) bindHint(action, label string) string {
+	keys := formatBindKeys(m.bindKeys(action))
+	if keys == "" {
+		return label
+	}
+	return keys + " " + label
+}
+
+func (m *Model) saveCancelHint(saveAction string) string {
+	return m.bindHint(saveAction, "save") + "   " + m.bindHint(actionEditEsc, "cancel")
+}
+
+func (m *Model) editEnterSaveCancelHint() string {
+	return m.saveCancelHint(actionEditEnter)
+}
+
+func (m *Model) editCtrlEnterSaveCancelHint() string {
+	return m.saveCancelHint(actionEditCtrlEnter)
+}
+
+func (m *Model) keyFormModalHint() string {
+	if m.EditMode == editNewKey && m.NewKeyFocus == newKeyFieldType {
+		return strings.Join([]string{
+			m.bindHint(actionBrowserUp, "up"),
+			m.bindHint(actionBrowserDown, "down"),
+			m.bindHint(actionEditEnter, "next"),
+			m.bindHint(actionEditTab, "next"),
+			m.bindHint(actionEditCtrlEnter, "save"),
+			m.bindHint(actionEditEsc, "cancel"),
+		}, "   ")
+	}
+	return strings.Join([]string{
+		m.bindHint(actionEditTab, "next"),
+		m.bindHint(actionEditCtrlEnter, "save"),
+		m.bindHint(actionEditEsc, "cancel"),
+	}, "   ")
 }
 
 func (m *Model) appendHelpBind(binds []keyBind) []keyBind {
