@@ -57,7 +57,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, cmd
 
 	case statusClearMsg:
-		if msg.gen == m.statusClearGen && m.Status == copiedToClipboardStatus {
+		if msg.gen == m.statusClearGen {
 			m.Status = ""
 		}
 		return m, nil
@@ -80,12 +80,12 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.Screen == ScreenProfileForm {
 			m.Screen = ScreenProfiles
 			m.FormEditing = false
-			m.Status = "profile saved"
+			return m, m.statusClearCmd("profile saved")
 		}
 		if m.Screen == ScreenConfirm && m.ConfirmAction == confirmDeleteProfile {
 			m.Screen = ScreenProfiles
 			m.ConfirmAction = confirmNone
-			m.Status = "profile deleted"
+			return m, m.statusClearCmd("profile deleted")
 		}
 		return m, nil
 
@@ -97,12 +97,12 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.Client = msg.client
 		m.ErrMsg = ""
-		m.Status = fmt.Sprintf("connected to %s", msg.client.Profile().Name)
 		m.Screen = ScreenBrowser
 		m.PanelFocus = panelKeys
 		m.PrevScreen = ScreenProfiles
 		m.scanGen = 1
-		return m, tea.Batch(loadInfo(m.Client), scanKeys(m.Client, 0, m.ScanPattern, false, m.scanGen), m.Spinner.Tick, m.scheduleAutoRefreshCmd())
+		statusCmd := m.statusClearCmd(fmt.Sprintf("connected to %s", msg.client.Profile().Name))
+		return m, tea.Batch(loadInfo(m.Client), scanKeys(m.Client, 0, m.ScanPattern, false, m.scanGen), m.Spinner.Tick, m.scheduleAutoRefreshCmd(), statusCmd)
 
 	case autoRefreshMsg:
 		cmds := []tea.Cmd{m.scheduleAutoRefreshCmd()}
@@ -175,7 +175,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		m.ErrMsg = ""
-		m.Status = msg.status
+		statusCmd := m.statusClearCmd(msg.status)
 		if m.Screen == ScreenConfirm {
 			switch m.ConfirmAction {
 			case confirmDeleteKey:
@@ -183,30 +183,31 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.SelectedKey = ""
 				m.KeyDetail = nil
 				m.ConfirmAction = confirmNone
-				return m, tea.Batch(loadInfo(m.Client), m.rescanKeysCmd())
+				return m, tea.Batch(loadInfo(m.Client), m.rescanKeysCmd(), statusCmd)
 			case confirmFlushDB:
 				m.Screen = ScreenBrowser
 				m.ConfirmAction = confirmNone
 				m.KeyDetail = nil
 				m.SelectedKey = ""
-				return m, tea.Batch(loadInfo(m.Client), m.rescanKeysCmd())
+				return m, tea.Batch(loadInfo(m.Client), m.rescanKeysCmd(), statusCmd)
 			case confirmDeleteProfile:
 				m.ConfirmAction = confirmNone
-				return m, nil
+				return m, statusCmd
 			}
 		}
 		if m.Screen == ScreenKeyEdit {
 			m.Screen = ScreenBrowser
 			m.blurEditInputs()
 			if m.EditMode == editRefreshInterval {
-				return m, m.scheduleAutoRefreshCmd()
+				return m, tea.Batch(m.scheduleAutoRefreshCmd(), statusCmd)
 			}
 			if (m.EditMode == editNewKey || m.EditMode == editExistingKey) && msg.reload && m.Client != nil {
-				return m, tea.Batch(loadInfo(m.Client), m.rescanKeysCmd())
+				return m, tea.Batch(loadInfo(m.Client), m.rescanKeysCmd(), statusCmd)
 			}
 			if msg.reload && m.Client != nil && m.SelectedKey != "" {
-				return m, loadKeyDetail(m.Client, m.SelectedKey)
+				return m, tea.Batch(loadKeyDetail(m.Client, m.SelectedKey), statusCmd)
 			}
+			return m, statusCmd
 		}
 		if m.Screen == ScreenProfileForm {
 			m.Screen = ScreenProfiles
@@ -214,9 +215,9 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		if msg.reload && m.Screen == ScreenBrowser && m.Client != nil && m.SelectedKey != "" {
 			m.Loading = true
-			return m, loadKeyDetail(m.Client, m.SelectedKey)
+			return m, tea.Batch(loadKeyDetail(m.Client, m.SelectedKey), statusCmd)
 		}
-		return m, nil
+		return m, statusCmd
 	}
 
 	return m, nil
@@ -883,8 +884,18 @@ func detailItemCount(d *store.KeyDetail) int {
 
 const (
 	copiedToClipboardStatus = "copied to clipboard"
-	copiedStatusDuration    = 3 * time.Second
+	statusMessageDuration   = 3 * time.Second
 )
+
+func (m *Model) statusClearCmd(msg string) tea.Cmd {
+	if msg == "" {
+		return nil
+	}
+	m.Status = msg
+	m.statusClearGen++
+	gen := m.statusClearGen
+	return clearStatusAfter(statusMessageDuration, gen)
+}
 
 func (m *Model) copyDetailValue() (tea.Model, tea.Cmd) {
 	if m.KeyDetail == nil || m.SelectedKey == "" {
@@ -900,10 +911,7 @@ func (m *Model) copyDetailValue() (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	m.ErrMsg = ""
-	m.Status = copiedToClipboardStatus
-	m.statusClearGen++
-	gen := m.statusClearGen
-	return m, clearStatusAfter(copiedStatusDuration, gen)
+	return m, m.statusClearCmd(copiedToClipboardStatus)
 }
 
 func writeSystemClipboard(text string) error {

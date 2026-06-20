@@ -349,6 +349,24 @@ func TestStatusClearAfterCopy(t *testing.T) {
 	}
 }
 
+func TestStatusClearAfterFlush(t *testing.T) {
+	m := New()
+	m.Screen = ScreenBrowser
+	m.Client = &store.Client{}
+
+	next, _ := m.Update(actionDoneMsg{status: "database flushed"})
+	m = next.(*Model)
+	if m.Status != "database flushed" {
+		t.Fatalf("status = %q", m.Status)
+	}
+
+	next, _ = m.Update(statusClearMsg{gen: m.statusClearGen})
+	m = next.(*Model)
+	if m.Status != "" {
+		t.Fatalf("status = %q, want empty", m.Status)
+	}
+}
+
 func TestBrowserCopyBind(t *testing.T) {
 	m := New()
 	m.Width = 120
