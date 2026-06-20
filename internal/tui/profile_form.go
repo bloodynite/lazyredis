@@ -7,6 +7,7 @@ import (
 
 	"github.com/charmbracelet/bubbles/textinput"
 	"github.com/bloodynite/lazyredis/internal/config"
+	"github.com/rivo/uniseg"
 )
 
 const (
@@ -61,6 +62,88 @@ func newProfileFormInputs() []textinput.Model {
 	}
 	inputs[formFieldName].Focus()
 	return inputs
+}
+
+func isPasswordFormField(i int) bool {
+	return i == formFieldPassword || i == formFieldSentinelPassword
+}
+
+func passwordEchoDisplay(value string, pos int, echo rune, focused bool) string {
+	if value == "" {
+		return ""
+	}
+	if !focused {
+		return strings.Repeat(string(echo), uniseg.StringWidth(value))
+	}
+	runes := []rune(value)
+	n := len(runes)
+	out := make([]rune, n)
+	for i, r := range runes {
+		show := (pos == n && i == n-1) || (pos < n && i == pos)
+		if show {
+			out[i] = r
+		} else {
+			out[i] = echo
+		}
+	}
+	return string(out)
+}
+
+func passwordInputView(ti textinput.Model) string {
+	value := ti.Value()
+	if value == "" {
+		return ti.View()
+	}
+
+	echo := ti.EchoCharacter
+	if echo == 0 {
+		echo = '*'
+	}
+
+	pos := ti.Position()
+	displayed := passwordEchoDisplay(value, pos, echo, ti.Focused())
+	styleText := ti.TextStyle.Inline(true).Render
+
+	if !ti.Focused() {
+		v := styleText(displayed)
+		if ti.Width > 0 {
+			padding := max(0, ti.Width-uniseg.StringWidth(displayed))
+			v += styleText(strings.Repeat(" ", padding))
+		}
+		return ti.PromptStyle.Render(ti.Prompt) + v
+	}
+
+	dispRunes := []rune(displayed)
+	cursorPos := min(pos, len(dispRunes))
+
+	var v string
+	v = styleText(string(dispRunes[:cursorPos]))
+	if cursorPos < len(dispRunes) {
+		ti.Cursor.SetChar(string(dispRunes[cursorPos]))
+		v += ti.Cursor.View()
+		v += styleText(string(dispRunes[cursorPos+1:]))
+	} else {
+		ti.Cursor.SetChar(" ")
+		v += ti.Cursor.View()
+	}
+
+	valWidth := uniseg.StringWidth(displayed)
+	if ti.Width > 0 && valWidth <= ti.Width {
+		padding := max(0, ti.Width-valWidth)
+		if valWidth+padding <= ti.Width && cursorPos < len(dispRunes) {
+			padding++
+		}
+		v += styleText(strings.Repeat(" ", padding))
+	}
+
+	return ti.PromptStyle.Render(ti.Prompt) + v
+}
+
+func profileFormInputView(inputs []textinput.Model, i int) string {
+	if isPasswordFormField(i) {
+		return passwordInputView(inputs[i])
+	}
+	return inputs[i].View()
 }
 
 func profileFromForm(values []textinput.Model) (config.Profile, error) {

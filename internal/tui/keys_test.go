@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"strings"
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -31,6 +32,24 @@ func TestCustomKeybindingOverride(t *testing.T) {
 	}
 	if m.matchAction(actionBrowserRefresh, "r") {
 		t.Fatal("default refresh key should be overridden")
+	}
+}
+
+func TestSaveCancelHintUsesCustomBinding(t *testing.T) {
+	m := New()
+	m.Config = &config.File{
+		Settings: config.Settings{
+			Keybindings: map[string]string{
+				actionEditEnter: "ctrl+p",
+			},
+		},
+	}
+	hint := m.editEnterSaveCancelHint()
+	if !strings.Contains(hint, "ctrl+p save") {
+		t.Fatalf("hint = %q, want custom save bind", hint)
+	}
+	if strings.Contains(hint, "ctrl+s") {
+		t.Fatalf("hint = %q, should not show default save bind", hint)
 	}
 }
 

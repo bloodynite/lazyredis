@@ -281,12 +281,72 @@ func EnsureDefault() (*File, error) {
 	if !os.IsNotExist(err) {
 		return nil, err
 	}
-	def := DefaultProfiles()
-	if err := Save(def); err != nil {
+	dir, err := Dir()
+	if err != nil {
 		return nil, err
 	}
-	if def == nil {
-		def = &File{}
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return nil, err
 	}
-	return def, nil
+	if err := os.WriteFile(path, []byte(defaultConfigTemplate), 0o600); err != nil {
+		return nil, err
+	}
+	cfg, err := Load()
+	if err != nil {
+		return nil, err
+	}
+	if cfg == nil {
+		cfg = &File{}
+	}
+	return cfg, nil
 }
+
+const defaultConfigTemplate = `# lazyredis settings and connection profiles
+# Keybindings: see README "Action ID reference" (or press ? in the app)
+
+settings:
+  refresh_interval_seconds: 5
+  # Optional. action_id: "key" or "key1, key2" — replaces defaults; restart after edit
+  # Common save actions: form.enter, edit.enter, edit.ctrl_enter
+  # keybindings:
+  #   form.enter: "ctrl+s, enter"
+  #   edit.enter: "ctrl+s, enter"
+  #   edit.ctrl_enter: "ctrl+s, ctrl+enter"
+
+profiles:
+  - name: local
+    mode: standalone
+    addr: 127.0.0.1:6379
+    password: ""
+    db: 0
+
+  - name: local-auth
+    mode: standalone
+    addr: 127.0.0.1:6379
+    password: change-me
+    db: 0
+
+  - name: secure-remote
+    mode: standalone
+    addr: 10.0.0.5:6379
+    password: change-me
+    db: 0
+    tls:
+      enabled: true
+      ca_cert: /etc/ssl/redis-ca.pem
+      cert: /etc/ssl/redis-client.pem
+      key: /etc/ssl/redis-client.key
+      server_name: redis.internal
+    ssh_tunnel:
+      enabled: true
+      host: jump.example.com:22
+      user: deploy
+      private_key: ~/.ssh/id_ed25519
+      known_hosts: ~/.ssh/known_hosts
+      insecure_skip_verify: false
+    proxy:
+      type: socks5
+      addr: corp-proxy:1080
+      username: proxy-user
+      password: proxy-pass
+`

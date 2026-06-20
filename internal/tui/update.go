@@ -522,25 +522,24 @@ func (m *Model) startEdit() (tea.Model, tea.Cmd) {
 
 func (m *Model) updateEditInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	key := msg.String()
-	var cmd tea.Cmd
-	m.EditInput, cmd = m.EditInput.Update(msg)
-	if !m.matchAction(actionEditEnter, key) {
-		return m, cmd
+	if m.matchAction(actionEditEnter, key) {
+		value := strings.TrimSpace(m.EditInput.Value())
+		switch m.EditMode {
+		case editRefreshInterval:
+			sec, err := strconv.Atoi(value)
+			if err != nil || sec < 0 {
+				m.ErrMsg = "seconds must be >= 0"
+				return m, nil
+			}
+			m.Loading = true
+			return m, saveRefreshInterval(m.Config, sec)
+		case editElement, editElementAdd:
+			return m.submitElementEdit()
+		}
 	}
 
-	value := strings.TrimSpace(m.EditInput.Value())
-	switch m.EditMode {
-	case editRefreshInterval:
-		sec, err := strconv.Atoi(value)
-		if err != nil || sec < 0 {
-			m.ErrMsg = "seconds must be >= 0"
-			return m, cmd
-		}
-		m.Loading = true
-		return m, saveRefreshInterval(m.Config, sec)
-	case editElement, editElementAdd:
-		return m.submitElementEdit()
-	}
+	var cmd tea.Cmd
+	m.EditInput, cmd = m.EditInput.Update(msg)
 	return m, cmd
 }
 
@@ -795,23 +794,23 @@ func (m *Model) updateFormInputs(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	}
 
 	var cmd tea.Cmd
-	m.FormInputs[m.FormFocus], cmd = m.FormInputs[m.FormFocus].Update(msg)
-	if !m.matchAction(actionFormEnter, key) {
-		return m, cmd
+	if m.matchAction(actionFormEnter, key) {
+		p, err := profileFromForm(m.FormInputs)
+		if err != nil {
+			m.ErrMsg = err.Error()
+			return m, nil
+		}
+		if m.FormEditing && m.Config != nil {
+			if existing, _ := m.Config.Find(m.FormOriginal); existing != nil {
+				p = config.MergeProfile(*existing, p)
+			}
+		}
+		m.Loading = true
+		return m, saveProfile(m.Config, p)
 	}
 
-	p, err := profileFromForm(m.FormInputs)
-	if err != nil {
-		m.ErrMsg = err.Error()
-		return m, cmd
-	}
-	if m.FormEditing && m.Config != nil {
-		if existing, _ := m.Config.Find(m.FormOriginal); existing != nil {
-			p = config.MergeProfile(*existing, p)
-		}
-	}
-	m.Loading = true
-	return m, saveProfile(m.Config, p)
+	m.FormInputs[m.FormFocus], cmd = m.FormInputs[m.FormFocus].Update(msg)
+	return m, cmd
 }
 
 func (m *Model) resetForm(name string) {
