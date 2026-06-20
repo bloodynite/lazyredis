@@ -79,11 +79,13 @@ func (m *Model) viewBrowserLayout() string {
 }
 
 const (
-	gridInfoRows        = 2
-	gridStatusRows      = 1
-	gridKeybarRows      = 2
-	gridPanelBorderRows = 2
-	gridFixedRows       = gridInfoRows + gridStatusRows + gridKeybarRows
+	gridInfoRows           = 2
+	gridStatusRows         = 1
+	gridKeybarRows         = 2
+	gridPanelBorderRows    = 2
+	gridFixedRows          = gridInfoRows + gridStatusRows + gridKeybarRows
+	panelHorizontalPadding = 2
+	panelChromeCols        = 4
 )
 
 func (m *Model) panelAreaLines() int {
@@ -218,8 +220,8 @@ func (m *Model) renderBrowserPanels() string {
 		rightStyle = panelFocusedStyle
 	}
 
-	left := leftStyle.Width(leftW).Height(height).Render(m.renderKeysPanel(leftW, height))
-	right := rightStyle.Width(rightW).Height(height).Render(m.renderDetailPanel(rightW, height))
+	left := leftStyle.Width(leftW-panelHorizontalPadding).Height(height).Render(m.renderKeysPanel(leftW-panelChromeCols, height))
+	right := rightStyle.Width(rightW-panelHorizontalPadding).Height(height).Render(m.renderDetailPanel(rightW-panelChromeCols, height))
 	return lipgloss.JoinHorizontal(lipgloss.Top, left, right)
 }
 
@@ -544,7 +546,7 @@ func (m *Model) viewProfileForm() string {
 		if i == m.FormFocus {
 			prefix = "▸ "
 		}
-		lines = append(lines, fmt.Sprintf("%s%s: %s", prefix, label, m.FormInputs[i].View()))
+		lines = append(lines, fmt.Sprintf("%s%s: %s", prefix, label, profileFormInputView(m.FormInputs, i)))
 	}
 	return strings.Join(lines, "\n")
 }
@@ -565,13 +567,13 @@ func (m *Model) viewKeyEdit() string {
 	}
 	if (m.EditMode == editElement || m.EditMode == editElementAdd) && m.elementEditUsesTextarea() {
 		m.syncNewKeyLayout()
-		return subtitleStyle.Render(title) + "\n" + m.NewKeyValue.View() + "\n" + confirmHintStyle.Render("ctrl+enter save   esc cancel")
+		return subtitleStyle.Render(title) + "\n" + m.NewKeyValue.View() + "\n" + confirmHintStyle.Render(m.editCtrlEnterSaveCancelHint())
 	}
-	hint := confirmHintStyle.Render("enter save   esc cancel")
+	hint := confirmHintStyle.Render(m.editEnterSaveCancelHint())
 	if m.EditMode == editElement || m.EditMode == editElementAdd {
 		return subtitleStyle.Render(title) + "\n" + m.EditInput.View() + "\n" + hint
 	}
-	return subtitleStyle.Render(title) + "\n" + m.EditInput.View()
+	return subtitleStyle.Render(title) + "\n" + m.EditInput.View() + "\n" + hint
 }
 
 func (m *Model) editUsesModal() bool {
@@ -587,7 +589,7 @@ func (m *Model) renderEditModal() string {
 	}
 	inner := panelTitleStyle.Render("Auto refresh") + "\n\n" +
 		m.EditInput.View() + "\n\n" +
-		confirmHintStyle.Render("enter save   esc cancel")
+		confirmHintStyle.Render(m.editEnterSaveCancelHint())
 	width := min(56, max(36, lipgloss.Width(m.EditInput.View())+8))
 	return confirmModalStyle.Width(width).Render(inner)
 }
@@ -598,7 +600,7 @@ func (m *Model) renderTTLModal() string {
 	inner := panelTitleStyle.Render("TTL") + "\n\n" +
 		keyLine + "\n\n" +
 		fmt.Sprintf("TTL: %s", m.NewKeyTTL.View()) + "\n\n" +
-		confirmHintStyle.Render("enter save   esc cancel")
+		confirmHintStyle.Render(m.editEnterSaveCancelHint())
 	width := min(56, max(36, lipgloss.Width(m.NewKeyTTL.View())+8))
 	return confirmModalStyle.Width(width).Render(inner)
 }
@@ -644,11 +646,7 @@ func (m *Model) renderKeyFormModal() string {
 	lines = append(lines, valuePrefix+valueLabel+":")
 	lines = append(lines, m.NewKeyValue.View())
 
-	hint := "tab next   ctrl+enter save   esc cancel"
-	if m.EditMode == editNewKey && m.NewKeyFocus == newKeyFieldType {
-		hint = "↑/k up   ↓/j down   enter next   tab next   ctrl+enter save   esc cancel"
-	}
-	lines = append(lines, "", confirmHintStyle.Render(hint))
+	lines = append(lines, "", confirmHintStyle.Render(m.keyFormModalHint()))
 	inner := strings.Join(lines, "\n")
 	width := min(70, max(48, m.Width*2/3))
 	return confirmModalStyle.Width(width).Render(inner)

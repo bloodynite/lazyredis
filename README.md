@@ -39,7 +39,7 @@ Edit key modal with TTL, type, and value fields:
 From a release tag:
 
 ```bash
-go install github.com/bloodynite/lazyredis/cmd/lazyredis@v0.0.5
+go install github.com/bloodynite/lazyredis/cmd/lazyredis@v0.0.6
 ```
 
 Then run:
@@ -203,29 +203,106 @@ The proxy is used to reach the SSH server and/or Redis, depending on profile set
 | `refresh_interval_seconds` | Auto-refresh interval in seconds (`0` = off). Default: `5` |
 | `keybindings` | Map of action ID → key string (comma-separated for multiple binds) |
 
-Action IDs match the defaults in [internal/tui/keys.go](internal/tui/keys.go), for example:
+### Keybindings
 
-- `browser.edit`, `browser.delete`, `browser.ttl`, `browser.new_key`, `browser.copy`
-- `browser.detail_add`, `browser.detail_edit`, `browser.detail_delete`
-- `browser.refresh`, `browser.auto_refresh`, `browser.flush`
-- `browser.filter`, `browser.more_keys`, `browser.disconnect`
-- `app.help`, `app.force_quit`
+Add custom binds under `settings.keybindings` in `profiles.yaml`. Restart lazyredis after editing the file.
 
-Keys are normalized to lowercase. Supported modifiers: `ctrl+`, `alt+`, `shift+`.
+**Rules**
+
+- Keys are normalized to lowercase.
+- Supported modifiers: `ctrl+`, `alt+`, `shift+`.
+- Multiple keys for one action: comma-separated (e.g. `"ctrl+s, alt+s, enter"`).
+- Setting an action **replaces** its default binds entirely (it does not merge with them).
+- Unknown action IDs are ignored.
+- Modal hints, the keybar, and the in-app help (`?`) all read these binds at runtime.
+
+**Example**
+
+```yaml
+settings:
+  keybindings:
+    form.enter: "alt+s"
+    edit.enter: "alt+s, enter"
+    edit.ctrl_enter: "alt+s, ctrl+enter"
+    browser.refresh: "ctrl+r"
+    browser.flush: "ctrl+f"
+    browser.filter: "alt+/"
+```
+
+#### Action ID reference
+
+| Action ID | Default | Description |
+|-----------|---------|-------------|
+| **Global** | | |
+| `app.help` | `?` | Toggle keyboard help overlay |
+| `app.force_quit` | `ctrl+c` | Force quit the application |
+| `help.close` | `?`, `esc` | Close the help overlay |
+| **Profiles screen** | | |
+| `profiles.up` | `k`, `up` | Move selection up |
+| `profiles.down` | `j`, `down` | Move selection down |
+| `profiles.connect` | `enter` | Connect to selected profile |
+| `profiles.new` | `n` | New profile (opens profile form) |
+| `profiles.edit` | `e` | Edit selected profile |
+| `profiles.delete` | `d` | Delete selected profile (confirmation) |
+| `profiles.quit` | `q` | Quit the application |
+| **Profile form** | | |
+| `form.tab` | `tab` | Next field |
+| `form.shift_tab` | `shift+tab` | Previous field |
+| `form.enter` | `ctrl+s`, `enter` | Save profile |
+| `form.esc` | `esc` | Cancel and return to Profiles |
+| **Browser** | | |
+| `browser.tab` | `tab` | Switch Keys / Detail panel focus |
+| `browser.up` | `k`, `up` | Move up in the focused panel |
+| `browser.down` | `j`, `down` | Move down in the focused panel |
+| `browser.filter` | `/` | Open key filter input |
+| `browser.filter_apply` | `enter` | Apply filter (while filter input is focused) |
+| `browser.filter_cancel` | `esc` | Close filter without applying |
+| `browser.new_key` | `n` | New key modal |
+| `browser.refresh` | `r` | Refresh keys and server info |
+| `browser.auto_refresh` | `a` | Edit auto-refresh interval |
+| `browser.flush` | `ctrl+f` | Flush current database (confirmation) |
+| `browser.more_keys` | `g` | Load next page of keys (when scan cursor remains) |
+| `browser.ttl` | `t` | Edit TTL for selected key |
+| `browser.delete` | `d` | Delete selected key (confirmation) |
+| `browser.edit` | `e` | Edit selected key (Keys panel) |
+| `browser.detail_add` | `i` | Add item (Detail panel, composite types) |
+| `browser.detail_edit` | `e` | Edit item or string value (Detail panel) |
+| `browser.detail_delete` | `d` | Delete item (Detail panel) |
+| `browser.copy` | `c` | Copy value to system clipboard |
+| `browser.disconnect` | `q` | Disconnect and return to Profiles |
+| **Modals (new/edit key, TTL, auto-refresh, item edit)** | | |
+| `edit.tab` | `tab` | Next field (key form modal) |
+| `edit.shift_tab` | `shift+tab` | Previous field (key form modal) |
+| `edit.enter` | `ctrl+s`, `enter` | Save (TTL, auto-refresh, single-line item edit); next field in key form (TTL / Type / Key fields) |
+| `edit.ctrl_enter` | `ctrl+s`, `ctrl+enter` | Save (key form modal, textarea item edit) |
+| `edit.esc` | `esc` | Cancel modal |
+| **Confirm dialog** | | |
+| `confirm.yes` | `y` | Confirm destructive action |
+| `confirm.no` | `n`, `esc` | Cancel |
+
+Source of truth in code: [internal/tui/keys.go](internal/tui/keys.go).
+
+**Notes**
+
+- In the key form modal, `edit.enter` advances between fields on TTL / Type / Key; `edit.ctrl_enter` saves the whole key.
+- `browser.up` / `browser.down` are also used to change key type when the Type field is focused in the new-key modal.
+- Rebind `browser.up`, `browser.down`, `browser.tab`, or shared letters (`n`, `e`, `d`, `q`) with care — the same action IDs are reused across screens where noted above.
 
 ## Screens
 
 | Screen | Purpose |
 |--------|---------|
 | **Profiles** | Select, create, edit, or delete connection profiles |
-| **Profile form** | Edit profile fields including TLS, proxy, and SSH (overlay) |
+| **Profile form** | Edit profile fields including TLS, proxy, and SSH (overlay). Password fields are masked while typing (last character visible until the next keystroke). |
 | **Browser** | Keys + detail panels with fixed chrome (see layout below) |
 | **Key edit** | Modals for new/edit key, TTL, auto-refresh, detail item edit |
 | **Confirm** | Destructive actions (delete key/profile, flush DB) |
 
-Press `?` anytime for context-sensitive help.
+Press `?` anytime for context-sensitive help (shows your configured binds for the current screen).
 
 ## Default keybindings
+
+The tables below describe default behavior when an action is **not** overridden in `settings.keybindings`. To customize, use the [action IDs](#action-id-reference) in `profiles.yaml`.
 
 ### Profiles
 
@@ -272,8 +349,9 @@ Context actions (`copy`, `edit`, `delete`, `ttl`, `g`) are pinned on the keybar 
 |-----|--------|
 | `Tab` / `Shift+Tab` | Next / previous field |
 | `↑` / `↓` | Change key type (new key modal, Type field focused) |
-| `Ctrl+Enter` | Save (key form, stream entry edit) |
-| `Enter` | Save (TTL, auto-refresh, single-line item edit) |
+| `Ctrl+S` | Save (profile form, key form, TTL, auto-refresh, item edit) |
+| `Enter` | Save (profile form, TTL, auto-refresh, single-line item edit); next field in key form (TTL / Type / Key) |
+| `Ctrl+Enter` | Save (alternative in key form and textarea item edit) |
 | `Esc` | Cancel |
 
 ### Confirm dialog
@@ -294,7 +372,7 @@ Modal fields (top to bottom):
 3. **Key** — key name
 4. **Value** — body format depends on type (scrollable textarea)
 
-Save with `Ctrl+Enter`.
+Save with `Ctrl+S` (`Ctrl+Enter` also works).
 
 ### Edit key (`e`)
 
