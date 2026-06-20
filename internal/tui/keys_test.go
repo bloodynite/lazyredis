@@ -4,7 +4,7 @@ import (
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/frankz/lazyredis/internal/config"
+	"github.com/bloodynite/lazyredis/internal/config"
 )
 
 func TestParseKeyList(t *testing.T) {

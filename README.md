@@ -27,7 +27,7 @@ Terminal UI for browsing and editing Redis keys. Built with [Bubble Tea](https:/
 ## Install
 
 ```bash
-git clone https://github.com/frankz/lazyredis.git
+git clone https://github.com/bloodynite/lazyredis.git
 cd lazyredis
 go build -o lazyredis ./cmd/lazyredis
 ```

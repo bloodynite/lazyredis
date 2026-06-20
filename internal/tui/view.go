@@ -5,8 +5,8 @@ import (
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
-	"github.com/frankz/lazyredis/internal/config"
-	"github.com/frankz/lazyredis/internal/store"
+	"github.com/bloodynite/lazyredis/internal/config"
+	"github.com/bloodynite/lazyredis/internal/store"
 )
 
 func (m *Model) View() string {

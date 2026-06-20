@@ -6,7 +6,7 @@ import (
 	"strings"
 
 	"github.com/charmbracelet/bubbles/textinput"
-	"github.com/frankz/lazyredis/internal/config"
+	"github.com/bloodynite/lazyredis/internal/config"
 )
 
 const (

@@ -5,8 +5,8 @@ import (
 	"github.com/charmbracelet/bubbles/textarea"
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/frankz/lazyredis/internal/config"
-	"github.com/frankz/lazyredis/internal/store"
+	"github.com/bloodynite/lazyredis/internal/config"
+	"github.com/bloodynite/lazyredis/internal/store"
 )
 
 type Screen int

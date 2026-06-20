@@ -11,7 +11,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/frankz/lazyredis/internal/config"
+	"github.com/bloodynite/lazyredis/internal/config"
 	"github.com/redis/go-redis/v9"
 	"golang.org/x/crypto/ssh"
 	"golang.org/x/crypto/ssh/knownhosts"

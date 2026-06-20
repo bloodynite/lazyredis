@@ -1,4 +1,4 @@
-module github.com/frankz/lazyredis
+module github.com/bloodynite/lazyredis
 
 go 1.25.0
 

@@ -3,7 +3,7 @@ package tui
 import (
 	"strings"
 
-	"github.com/frankz/lazyredis/internal/config"
+	"github.com/bloodynite/lazyredis/internal/config"
 )
 
 const (

@@ -12,8 +12,8 @@ import (
 	"github.com/aymanbagabas/go-osc52/v2"
 	"github.com/charmbracelet/bubbles/spinner"
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/frankz/lazyredis/internal/config"
-	"github.com/frankz/lazyredis/internal/store"
+	"github.com/bloodynite/lazyredis/internal/config"
+	"github.com/bloodynite/lazyredis/internal/store"
 )
 
 func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {

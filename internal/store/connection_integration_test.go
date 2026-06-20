@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/frankz/lazyredis/internal/config"
+	"github.com/bloodynite/lazyredis/internal/config"
 	"gopkg.in/yaml.v3"
 )
 

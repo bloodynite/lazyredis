@@ -3,7 +3,7 @@ package store
 import (
 	"testing"
 
-	"github.com/frankz/lazyredis/internal/config"
+	"github.com/bloodynite/lazyredis/internal/config"
 )
 
 func TestBuildTLSConfigFromProfile(t *testing.T) {

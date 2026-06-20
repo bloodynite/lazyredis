@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/frankz/lazyredis/internal/store"
+	"github.com/bloodynite/lazyredis/internal/store"
 )
 
 func TestKeybarForBrowser(t *testing.T) {
