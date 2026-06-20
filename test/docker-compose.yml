@@ -1,0 +1,134 @@
+name: lazyredis-test
+
+services:
+  redis:
+    image: redis:7.4
+    command: ["redis-server", "--requirepass", "redis_secret"]
+    ports:
+      - "16379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "redis_secret", "ping"]
+      interval: 2s
+      timeout: 2s
+      retries: 15
+
+  redis-tls:
+    image: redis:7.4
+    depends_on:
+      redis:
+        condition: service_healthy
+    volumes:
+      - ./certs/redis.crt:/tls/redis.crt:ro
+      - ./certs/redis.key:/tls/redis.key:ro
+    command:
+      - redis-server
+      - --port
+      - "0"
+      - --tls-port
+      - "6666"
+      - --tls-cert-file
+      - /tls/redis.crt
+      - --tls-key-file
+      - /tls/redis.key
+      - --tls-auth-clients
+      - "no"
+      - --requirepass
+      - redis_secret
+    ports:
+      - "16666:6666"
+    healthcheck:
+      test: ["CMD", "redis-cli", "--tls", "--insecure", "-p", "6666", "-a", "redis_secret", "ping"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+
+  socks5:
+    build: ./socks5
+    network_mode: host
+
+  ssh-jump:
+    build: ./ssh
+    depends_on:
+      redis:
+        condition: service_healthy
+    ports:
+      - "12222:22"
+    volumes:
+      - ./ssh/authorized_keys:/mnt/authorized_keys:ro
+    healthcheck:
+      test: ["CMD", "nc", "-z", "127.0.0.1", "22"]
+      interval: 2s
+      timeout: 2s
+      retries: 15
+
+  redis-master:
+    image: redis:7.4
+    command: ["redis-server", "--port", "16380", "--requirepass", "redis_secret", "--masterauth", "redis_secret"]
+    network_mode: host
+    healthcheck:
+      test: ["CMD", "redis-cli", "-p", "16380", "-a", "redis_secret", "ping"]
+      interval: 2s
+      timeout: 2s
+      retries: 15
+
+  redis-replica:
+    image: redis:7.4
+    depends_on:
+      redis-master:
+        condition: service_healthy
+    network_mode: host
+    command:
+      - redis-server
+      - --port
+      - "16381"
+      - --requirepass
+      - redis_secret
+      - --masterauth
+      - redis_secret
+      - --replicaof
+      - 127.0.0.1
+      - "16380"
+    healthcheck:
+      test: ["CMD", "redis-cli", "-p", "16381", "-a", "redis_secret", "ping"]
+      interval: 2s
+      timeout: 2s
+      retries: 15
+
+  sentinel-1:
+    image: redis:7.4
+    depends_on:
+      redis-master:
+        condition: service_healthy
+    network_mode: host
+    volumes:
+      - ./sentinel/sentinel-1.conf:/etc/sentinel.conf
+    command: ["redis-sentinel", "/etc/sentinel.conf"]
+
+  sentinel-2:
+    image: redis:7.4
+    depends_on:
+      redis-master:
+        condition: service_healthy
+    network_mode: host
+    volumes:
+      - ./sentinel/sentinel-2.conf:/etc/sentinel.conf
+    command: ["redis-sentinel", "/etc/sentinel.conf"]
+
+  sentinel-3:
+    image: redis:7.4
+    depends_on:
+      redis-master:
+        condition: service_healthy
+    network_mode: host
+    volumes:
+      - ./sentinel/sentinel-3.conf:/etc/sentinel.conf
+    command: ["redis-sentinel", "/etc/sentinel.conf"]
+
+  redis-cluster:
+    image: grokzen/redis-cluster:7.0.10
+    network_mode: host
+    environment:
+      - IP=127.0.0.1
+      - INITIAL_PORT=7000
+      - MASTERS=3
+      - SLAVES_PER_MASTER=1

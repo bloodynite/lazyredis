@@ -1,0 +1,6 @@
+/lazyredis
+/redis-tui
+test/certs/
+test/keys/
+test/profiles.generated.yaml
+test/ssh/authorized_keys

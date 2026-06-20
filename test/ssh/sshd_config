@@ -1,0 +1,8 @@
+Port 22
+ListenAddress 0.0.0.0
+PermitRootLogin no
+PasswordAuthentication no
+PubkeyAuthentication yes
+AuthorizedKeysFile .ssh/authorized_keys
+AllowUsers testuser
+PidFile /var/run/sshd.pid
