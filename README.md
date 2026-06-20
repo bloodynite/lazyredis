@@ -2,6 +2,16 @@
 
 Terminal UI for browsing and editing Redis keys. Built with [Bubble Tea](https://github.com/charmbracelet/bubbletea).
 
+## Screenshots
+
+Browser connected to a local profile, browsing `demos:*` keys across Redis types:
+
+![Browser with demo keys](docs/screenshots/browser-demos-keys.png)
+
+Edit key modal with TTL, type, and value fields:
+
+![Edit key modal](docs/screenshots/edit-key-modal.png)
+
 ## Features
 
 - **Connection profiles** with standalone, cluster, and sentinel modes
@@ -52,8 +62,6 @@ On first launch, a default config is created at `~/.config/lazyredis/profiles.ya
 ## Configuration
 
 Config path: `~/.config/lazyredis/profiles.yaml`
-
-If you previously used **redis-tui**, your existing `~/.config/redis-tui/` directory (or `profiles.yaml` inside it) is migrated automatically on first launch.
 
 ### Example
 
@@ -204,28 +212,6 @@ Keys are normalized to lowercase. Supported modifiers: `ctrl+`, `alt+`, `shift+`
 | **Confirm** | Destructive actions (delete key/profile, flush DB) |
 
 Press `?` anytime for context-sensitive help.
-
-### Browser layout
-
-The terminal is divided into fixed and flexible regions (top to bottom):
-
-```
-┌─────────────────────────────────────────────┐  row 1   connection (profile, addr, db)
-├─────────────────────────────────────────────┤  row 2   server stats (version, mem, keys…)
-├──────────┬──────────────────────────────────┤  flexible  Keys (1/5) │ Detail (4/5)
-│  Keys    │  Detail                          │            only this area resizes
-│  …       │  …                               │
-│  meta    │                                  │  footer: loaded/total · g
-├──────────┴──────────────────────────────────┤  status   messages (connected, copy, errors, loading)
-├─────────────────────────────────────────────┤  keybar   shortcuts (wraps to 2 lines if needed)
-├─────────────────────────────────────────────┤  keybar   line 2
-└─────────────────────────────────────────────┘
-```
-
-- **Info rows** (1–2): always visible; server connection and stats
-- **Panels**: height = terminal height − 5 fixed rows − panel borders
-- **Status line**: transient messages (`connected to …`, `copied to clipboard`, errors, spinner); clears copy message after 3 seconds
-- **Keybar**: context shortcuts; wraps to a second line when they do not fit (pinned actions stay visible on line 2)
 
 ## Default keybindings
 
@@ -419,25 +405,10 @@ Stop the lab:
 cd test && ./down.sh
 ```
 
-Integration test (legacy, uses glyphverso Redis on 6379):
-
-```bash
-go test ./internal/store -run Integration -count=1
-```
-
 Skip integration tests in short mode:
 
 ```bash
 go test -short ./...
-```
-
-## Project layout
-
-```
-cmd/lazyredis/     Entry point
-internal/config/   YAML profiles and settings
-internal/store/    Redis client, dial chain (TLS/SSH/proxy), key I/O
-internal/tui/      Bubble Tea UI
 ```
 
 ## License

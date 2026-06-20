@@ -1,3 +1,5 @@
+//go:build integration
+
 package store
 
 import (
@@ -8,23 +10,25 @@ import (
 	"github.com/bloodynite/lazyredis/internal/config"
 )
 
-func TestIntegrationRedis(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping integration test in short mode")
+func TestIntegrationRedisCRUD(t *testing.T) {
+	root := testRoot(t)
+	profiles := loadTestProfiles(t, root)
+
+	var p *config.Profile
+	for i := range profiles {
+		if profiles[i].Name == "test-standalone" {
+			p = &profiles[i]
+			break
+		}
+	}
+	if p == nil {
+		t.Fatal("profile test-standalone not found")
 	}
 
 	ctx := context.Background()
-	p := config.Profile{
-		Name:     "integration",
-		Mode:     config.ModeStandalone,
-		Addr:     "127.0.0.1:6379",
-		Password: "redis_secret",
-		DB:       0,
-	}
-
-	client, err := Connect(ctx, p)
+	client, err := Connect(ctx, *p)
 	if err != nil {
-		t.Skipf("redis not available: %v", err)
+		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = client.Close() })
 

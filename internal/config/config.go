@@ -222,10 +222,10 @@ func DefaultProfiles() *File {
 				DB:       0,
 			},
 			{
-				Name:     "glyphverso",
+				Name:     "local-auth",
 				Mode:     ModeStandalone,
 				Addr:     "127.0.0.1:6379",
-				Password: "redis_secret",
+				Password: "change-me",
 				DB:       0,
 			},
 			{
