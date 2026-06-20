@@ -79,11 +79,13 @@ func (m *Model) viewBrowserLayout() string {
 }
 
 const (
-	gridInfoRows        = 2
-	gridStatusRows      = 1
-	gridKeybarRows      = 2
-	gridPanelBorderRows = 2
-	gridFixedRows       = gridInfoRows + gridStatusRows + gridKeybarRows
+	gridInfoRows           = 2
+	gridStatusRows         = 1
+	gridKeybarRows         = 2
+	gridPanelBorderRows    = 2
+	gridFixedRows          = gridInfoRows + gridStatusRows + gridKeybarRows
+	panelHorizontalPadding = 2
+	panelChromeCols        = 4
 )
 
 func (m *Model) panelAreaLines() int {
@@ -218,8 +220,8 @@ func (m *Model) renderBrowserPanels() string {
 		rightStyle = panelFocusedStyle
 	}
 
-	left := leftStyle.Width(leftW).Height(height).Render(m.renderKeysPanel(leftW, height))
-	right := rightStyle.Width(rightW).Height(height).Render(m.renderDetailPanel(rightW, height))
+	left := leftStyle.Width(leftW-panelHorizontalPadding).Height(height).Render(m.renderKeysPanel(leftW-panelChromeCols, height))
+	right := rightStyle.Width(rightW-panelHorizontalPadding).Height(height).Render(m.renderDetailPanel(rightW-panelChromeCols, height))
 	return lipgloss.JoinHorizontal(lipgloss.Top, left, right)
 }
 

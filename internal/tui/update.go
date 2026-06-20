@@ -22,7 +22,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.Width = msg.Width
 		m.Height = msg.Height
 		leftW, _ := m.browserPanelWidths()
-		m.SearchInput.Width = max(4, leftW-6)
+		m.SearchInput.Width = max(4, leftW-panelChromeCols-6)
 		initStyles()
 		if m.Screen == ScreenKeyEdit && (m.EditMode == editNewKey || m.EditMode == editExistingKey || m.EditMode == editTTL) {
 			m.syncNewKeyLayout()

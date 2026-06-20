@@ -7,6 +7,7 @@ import (
 
 	"github.com/bloodynite/lazyredis/internal/config"
 	"github.com/bloodynite/lazyredis/internal/store"
+	"github.com/charmbracelet/lipgloss"
 )
 
 func TestViewFitsTerminalHeight(t *testing.T) {
@@ -73,6 +74,30 @@ func TestViewDoesNotOverflowWithLongString(t *testing.T) {
 	lines := strings.Split(out, "\n")
 	if len(lines) != m.Height {
 		t.Fatalf("view lines = %d, want %d", len(lines), m.Height)
+	}
+}
+
+func TestViewBrowserPanelsFitWidth(t *testing.T) {
+	m := New()
+	m.Width = 100
+	m.Height = 24
+	m.Screen = ScreenBrowser
+	m.Client = &store.Client{}
+	m.Info = &store.ServerInfo{Version: "7.2", UsedMemory: "1M", TotalKeys: 10}
+	m.Config = &config.File{}
+	m.Keys = []string{"demo:key"}
+	m.KeyDetail = &store.KeyDetail{
+		Meta:   store.KeyMeta{Type: "string", Key: "demo:key"},
+		String: "hello world",
+	}
+
+	out := m.View()
+	lines := strings.Split(out, "\n")
+	panelEnd := gridInfoRows + m.panelAreaLines()
+	for i := gridInfoRows; i < panelEnd && i < len(lines); i++ {
+		if w := lipgloss.Width(lines[i]); w != m.Width {
+			t.Fatalf("panel line %d width=%d want %d", i, w, m.Width)
+		}
 	}
 }
 
