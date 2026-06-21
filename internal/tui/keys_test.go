@@ -8,45 +8,31 @@ import (
 	"github.com/bloodynite/lazyredis/internal/config"
 )
 
-func TestParseKeyList(t *testing.T) {
-	keys := parseKeyList(" ctrl+r , alt+f ,enter ")
-	if len(keys) != 3 {
-		t.Fatalf("expected 3 keys, got %d", len(keys))
-	}
-	if keys[0] != "ctrl+r" || keys[1] != "alt+f" || keys[2] != "enter" {
-		t.Fatalf("unexpected keys %#v", keys)
-	}
-}
-
-func TestCustomKeybindingOverride(t *testing.T) {
+func TestSaveKeyUsesShortcutModifier(t *testing.T) {
 	m := New()
 	m.Config = &config.File{
 		Settings: config.Settings{
-			Keybindings: map[string]string{
-				actionBrowserRefresh: "ctrl+r",
-			},
+			ShortcutModifier: "alt",
 		},
 	}
-	if !m.matchAction(actionBrowserRefresh, "ctrl+r") {
-		t.Fatal("expected ctrl+r to trigger refresh")
+	if !m.matchAction(actionSave, "alt+s") {
+		t.Fatal("expected alt+s to trigger save")
 	}
-	if m.matchAction(actionBrowserRefresh, "r") {
-		t.Fatal("default refresh key should be overridden")
+	if m.matchAction(actionSave, "ctrl+s") {
+		t.Fatal("ctrl+s should not trigger save when modifier is alt")
 	}
 }
 
-func TestSaveCancelHintUsesCustomBinding(t *testing.T) {
+func TestSaveCancelHintUsesShortcutModifier(t *testing.T) {
 	m := New()
 	m.Config = &config.File{
 		Settings: config.Settings{
-			Keybindings: map[string]string{
-				actionEditEnter: "ctrl+p",
-			},
+			ShortcutModifier: "alt",
 		},
 	}
-	hint := m.editEnterSaveCancelHint()
-	if !strings.Contains(hint, "ctrl+p save") {
-		t.Fatalf("hint = %q, want custom save bind", hint)
+	hint := m.saveCancelHint(actionSave)
+	if !strings.Contains(hint, "alt+s save") {
+		t.Fatalf("hint = %q, want alt save bind", hint)
 	}
 	if strings.Contains(hint, "ctrl+s") {
 		t.Fatalf("hint = %q, should not show default save bind", hint)

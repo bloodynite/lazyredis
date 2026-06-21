@@ -522,7 +522,7 @@ func (m *Model) startEdit() (tea.Model, tea.Cmd) {
 
 func (m *Model) updateEditInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	key := msg.String()
-	if m.matchAction(actionEditEnter, key) {
+	if m.matchAction(actionSave, key) {
 		value := strings.TrimSpace(m.EditInput.Value())
 		switch m.EditMode {
 		case editRefreshInterval:
@@ -614,7 +614,7 @@ func (m *Model) openTTLModal() (tea.Model, tea.Cmd) {
 
 func (m *Model) updateTTLModalInputs(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	key := msg.String()
-	if m.matchAction(actionEditEnter, key) {
+	if m.matchAction(actionSave, key) {
 		return m.submitTTLModal()
 	}
 	var cmd tea.Cmd
@@ -735,7 +735,7 @@ func (m *Model) submitKeyForm() (tea.Model, tea.Cmd) {
 
 func (m *Model) updateKeyFormInputs(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	key := msg.String()
-	if m.matchAction(actionEditCtrlEnter, key) {
+	if m.matchAction(actionSave, key) {
 		return m.submitKeyForm()
 	}
 	if m.matchAction(actionEditTab, key) || m.matchAction(actionEditShiftTab, key) {
@@ -756,15 +756,15 @@ func (m *Model) updateKeyFormInputs(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 	}
-	if m.matchAction(actionEditEnter, key) && m.NewKeyFocus == newKeyFieldTTL {
+	if key == "enter" && m.NewKeyFocus == newKeyFieldTTL {
 		next := m.nextKeyFormField(newKeyFieldTTL, 1)
 		return m, m.focusNewKeyField(next)
 	}
-	if m.matchAction(actionEditEnter, key) && m.NewKeyFocus == newKeyFieldType {
+	if key == "enter" && m.NewKeyFocus == newKeyFieldType {
 		next := m.nextKeyFormField(newKeyFieldType, 1)
 		return m, m.focusNewKeyField(next)
 	}
-	if m.matchAction(actionEditEnter, key) && m.NewKeyFocus == newKeyFieldKey {
+	if key == "enter" && m.NewKeyFocus == newKeyFieldKey {
 		return m, m.focusNewKeyField(newKeyFieldValue)
 	}
 
@@ -794,7 +794,7 @@ func (m *Model) updateFormInputs(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	}
 
 	var cmd tea.Cmd
-	if m.matchAction(actionFormEnter, key) {
+	if m.matchAction(actionSave, key) {
 		p, err := profileFromForm(m.FormInputs)
 		if err != nil {
 			m.ErrMsg = err.Error()
@@ -1202,7 +1202,7 @@ func (m *Model) submitElementEdit() (tea.Model, tea.Cmd) {
 
 func (m *Model) updateElementTextareaInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	key := msg.String()
-	if m.matchAction(actionEditCtrlEnter, key) {
+	if m.matchAction(actionSave, key) {
 		return m.submitElementEdit()
 	}
 	var cmd tea.Cmd

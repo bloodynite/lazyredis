@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"gopkg.in/yaml.v3"
 )
@@ -38,8 +39,8 @@ type Profile struct {
 }
 
 type Settings struct {
-	RefreshIntervalSec *int              `yaml:"refresh_interval_seconds,omitempty"`
-	Keybindings        map[string]string `yaml:"keybindings,omitempty"`
+	RefreshIntervalSec *int   `yaml:"refresh_interval_seconds,omitempty"`
+	ShortcutModifier   string `yaml:"shortcut_modifier,omitempty"`
 }
 
 type File struct {
@@ -52,6 +53,18 @@ func (f *File) GetRefreshIntervalSec() int {
 		return *f.Settings.RefreshIntervalSec
 	}
 	return DefaultRefreshIntervalSec
+}
+
+func (f *File) GetShortcutModifier() string {
+	if f == nil {
+		return "ctrl"
+	}
+	switch strings.ToLower(strings.TrimSpace(f.Settings.ShortcutModifier)) {
+	case "alt":
+		return "alt"
+	default:
+		return "ctrl"
+	}
 }
 
 func (f *File) SetRefreshIntervalSec(sec int) error {
@@ -302,16 +315,11 @@ func EnsureDefault() (*File, error) {
 }
 
 const defaultConfigTemplate = `# lazyredis settings and connection profiles
-# Keybindings: see README "Action ID reference" (or press ? in the app)
+# Shortcut modifier: ctrl or alt
 
 settings:
   refresh_interval_seconds: 5
-  # Optional. action_id: "key" or "key1, key2" — replaces defaults; restart after edit
-  # Common save actions: form.enter, edit.enter, edit.ctrl_enter
-  # keybindings:
-  #   form.enter: "ctrl+s, enter"
-  #   edit.enter: "ctrl+s, enter"
-  #   edit.ctrl_enter: "ctrl+s, ctrl+enter"
+  shortcut_modifier: ctrl
 
 profiles:
   - name: local
