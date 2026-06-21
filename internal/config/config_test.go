@@ -13,6 +13,7 @@ func TestSaveLoadRoundTrip(t *testing.T) {
 	defer t.Setenv("HOME", oldHome)
 
 	cfg := &File{
+		Settings: Settings{ShortcutModifier: "alt"},
 		Profiles: []Profile{
 			{Name: "test", Mode: ModeStandalone, Addr: "127.0.0.1:6379", DB: 1},
 		},
@@ -38,6 +39,9 @@ func TestSaveLoadRoundTrip(t *testing.T) {
 	}
 	if loaded.Profiles[0].Name != "test" {
 		t.Fatalf("unexpected profile name %q", loaded.Profiles[0].Name)
+	}
+	if loaded.GetShortcutModifier() != "alt" {
+		t.Fatalf("shortcut modifier = %q, want alt", loaded.GetShortcutModifier())
 	}
 }
 
@@ -153,6 +157,15 @@ func TestDefaultRefreshInterval(t *testing.T) {
 	}
 	if loaded.GetRefreshIntervalSec() != 5 {
 		t.Fatalf("loaded interval = %d, want 5", loaded.GetRefreshIntervalSec())
+	}
+}
+
+func TestShortcutModifierDefaults(t *testing.T) {
+	if got := (&File{}).GetShortcutModifier(); got != "ctrl" {
+		t.Fatalf("default shortcut modifier = %q, want ctrl", got)
+	}
+	if got := (&File{Settings: Settings{ShortcutModifier: "alt"}}).GetShortcutModifier(); got != "alt" {
+		t.Fatalf("alt shortcut modifier = %q, want alt", got)
 	}
 }
 

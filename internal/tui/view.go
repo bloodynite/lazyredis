@@ -3,6 +3,7 @@ package tui
 import (
 	"fmt"
 	"strings"
+	"runtime/debug"
 
 	"github.com/charmbracelet/lipgloss"
 	"github.com/bloodynite/lazyredis/internal/config"
@@ -136,16 +137,17 @@ func (m *Model) renderAppChrome(content string) string {
 }
 
 func (m *Model) renderInfoLine1() string {
+	prefix := appHeaderPrefix()
 	var line string
 	if m.Client != nil {
 		p := m.Client.Profile()
-		line = fmt.Sprintf("%s  %s  db %d", p.Name, p.Addr, p.DB)
+		line = fmt.Sprintf("%s - %s  %s  db %d", prefix, p.Name, p.Addr, p.DB)
 	} else {
 		screen := m.Screen
 		if m.Screen == ScreenConfirm {
 			screen = m.PrevScreen
 		}
-		line = screenName(screen)
+		line = fmt.Sprintf("%s - %s", prefix, screenName(screen))
 	}
 	return m.renderFixedRow(" "+truncatePlain(line, max(1, m.Width-2)), headerBarStyle)
 }
@@ -748,14 +750,25 @@ func (m *Model) renderHelpModal() string {
 		fmt.Sprintf("  %-16s %s", formatBindKeys(m.bindKeys(actionAppForceQuit)), "force quit"),
 	)
 	lines = append(lines, "",
-		confirmHintStyle.Render("Customize with settings.keybindings in profiles.yaml"),
-		confirmHintStyle.Render("Use ctrl+ or alt+ prefixes, comma for multiple keys"),
+		confirmHintStyle.Render("Customize save shortcuts with settings.shortcut_modifier"),
+		confirmHintStyle.Render("Use ctrl or alt"),
 		"",
 		confirmHintStyle.Render("Press ? or esc to close"),
 	)
 	inner := strings.Join(lines, "\n")
 	width := min(72, max(48, m.Width*2/3))
 	return confirmModalStyle.Width(width).Render(inner)
+}
+
+func appVersion() string {
+	if bi, ok := debug.ReadBuildInfo(); ok && bi.Main.Version != "" && bi.Main.Version != "(devel)" {
+		return bi.Main.Version
+	}
+	return "dev"
+}
+
+func appHeaderPrefix() string {
+	return "Lazyredis " + appVersion()
 }
 
 func wrapValue(label, value string, width, maxLines int) []string {

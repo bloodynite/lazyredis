@@ -10,6 +10,7 @@ const (
 	actionAppHelp      = "app.help"
 	actionAppForceQuit = "app.force_quit"
 	actionHelpClose    = "help.close"
+	actionSave         = "save"
 
 	actionProfilesUp      = "profiles.up"
 	actionProfilesDown    = "profiles.down"
@@ -21,7 +22,6 @@ const (
 
 	actionFormTab      = "form.tab"
 	actionFormShiftTab = "form.shift_tab"
-	actionFormEnter    = "form.enter"
 	actionFormEsc      = "form.esc"
 
 	actionBrowserDisconnect   = "browser.disconnect"
@@ -44,11 +44,9 @@ const (
 	actionBrowserFilterApply  = "browser.filter_apply"
 	actionBrowserFilterCancel = "browser.filter_cancel"
 
-	actionEditEnter     = "edit.enter"
-	actionEditEsc       = "edit.esc"
-	actionEditCtrlEnter = "edit.ctrl_enter"
-	actionEditTab       = "edit.tab"
-	actionEditShiftTab  = "edit.shift_tab"
+	actionEditEsc      = "edit.esc"
+	actionEditTab      = "edit.tab"
+	actionEditShiftTab = "edit.shift_tab"
 
 	actionConfirmYes = "confirm.yes"
 	actionConfirmNo  = "confirm.no"
@@ -74,7 +72,6 @@ var defaultKeyMap = map[string][]string{
 
 	actionFormTab:      {"tab"},
 	actionFormShiftTab: {"shift+tab"},
-	actionFormEnter:    {"ctrl+s", "enter"},
 	actionFormEsc:      {"esc"},
 
 	actionBrowserDisconnect:   {"q"},
@@ -97,26 +94,12 @@ var defaultKeyMap = map[string][]string{
 	actionBrowserFilterApply:  {"enter"},
 	actionBrowserFilterCancel: {"esc"},
 
-	actionEditEnter:     {"ctrl+s", "enter"},
-	actionEditEsc:       {"esc"},
-	actionEditCtrlEnter: {"ctrl+s", "ctrl+enter"},
-	actionEditTab:       {"tab"},
-	actionEditShiftTab:  {"shift+tab"},
+	actionEditEsc:      {"esc"},
+	actionEditTab:      {"tab"},
+	actionEditShiftTab: {"shift+tab"},
 
 	actionConfirmYes: {"y"},
 	actionConfirmNo:  {"n", "esc"},
-}
-
-func parseKeyList(raw string) []string {
-	parts := strings.Split(raw, ",")
-	out := make([]string, 0, len(parts))
-	for _, part := range parts {
-		key := normalizeKey(part)
-		if key != "" {
-			out = append(out, key)
-		}
-	}
-	return out
 }
 
 func normalizeKey(key string) string {
@@ -126,17 +109,21 @@ func normalizeKey(key string) string {
 }
 
 func keysFor(cfg *config.File, action string) []string {
-	if cfg != nil && cfg.Settings.Keybindings != nil {
-		if raw, ok := cfg.Settings.Keybindings[action]; ok {
-			if keys := parseKeyList(raw); len(keys) > 0 {
-				return keys
-			}
-		}
+	if action == actionSave {
+		return saveBindKeys(cfg)
 	}
 	if keys, ok := defaultKeyMap[action]; ok {
 		return keys
 	}
 	return nil
+}
+
+func saveBindKeys(cfg *config.File) []string {
+	modifier := "ctrl"
+	if cfg != nil && cfg.GetShortcutModifier() == "alt" {
+		modifier = "alt"
+	}
+	return []string{modifier + "+s"}
 }
 
 func (m *Model) bindKeys(action string) []string {
@@ -221,11 +208,11 @@ func (m *Model) saveCancelHint(saveAction string) string {
 }
 
 func (m *Model) editEnterSaveCancelHint() string {
-	return m.saveCancelHint(actionEditEnter)
+	return m.saveCancelHint(actionSave)
 }
 
 func (m *Model) editCtrlEnterSaveCancelHint() string {
-	return m.saveCancelHint(actionEditCtrlEnter)
+	return m.saveCancelHint(actionSave)
 }
 
 func (m *Model) keyFormModalHint() string {
@@ -233,15 +220,14 @@ func (m *Model) keyFormModalHint() string {
 		return strings.Join([]string{
 			m.bindHint(actionBrowserUp, "up"),
 			m.bindHint(actionBrowserDown, "down"),
-			m.bindHint(actionEditEnter, "next"),
 			m.bindHint(actionEditTab, "next"),
-			m.bindHint(actionEditCtrlEnter, "save"),
+			m.bindHint(actionSave, "save"),
 			m.bindHint(actionEditEsc, "cancel"),
 		}, "   ")
 	}
 	return strings.Join([]string{
 		m.bindHint(actionEditTab, "next"),
-		m.bindHint(actionEditCtrlEnter, "save"),
+		m.bindHint(actionSave, "save"),
 		m.bindHint(actionEditEsc, "cancel"),
 	}, "   ")
 }
@@ -256,14 +242,14 @@ func (m *Model) applicableHelpActions() []bindDef {
 		return []bindDef{
 			{actionFormTab, "next field"},
 			{actionFormShiftTab, "previous field"},
-			{actionFormEnter, "save"},
+			{actionSave, "save"},
 			{actionFormEsc, "cancel"},
 		}
 	case m.Screen == ScreenKeyEdit && (m.EditMode == editNewKey || m.EditMode == editExistingKey):
 		defs := []bindDef{
 			{actionEditTab, "next field"},
 			{actionEditShiftTab, "previous field"},
-			{actionEditCtrlEnter, "save"},
+			{actionSave, "save"},
 			{actionEditEsc, "cancel"},
 		}
 		if m.EditMode == editNewKey && m.NewKeyFocus == newKeyFieldType {
@@ -276,17 +262,17 @@ func (m *Model) applicableHelpActions() []bindDef {
 	case m.Screen == ScreenKeyEdit && (m.EditMode == editElement || m.EditMode == editElementAdd):
 		if m.elementEditUsesTextarea() {
 			return []bindDef{
-				{actionEditCtrlEnter, "save"},
+				{actionSave, "save"},
 				{actionEditEsc, "cancel"},
 			}
 		}
 		return []bindDef{
-			{actionEditEnter, "save"},
+			{actionSave, "save"},
 			{actionEditEsc, "cancel"},
 		}
 	case m.Screen == ScreenKeyEdit:
 		return []bindDef{
-			{actionEditEnter, "save"},
+			{actionSave, "save"},
 			{actionEditEsc, "cancel"},
 		}
 	case m.Screen == ScreenBrowser && m.SearchFocus:
