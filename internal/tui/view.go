@@ -502,6 +502,27 @@ func compositeRowPrefix(i int, inDetail bool, cursor int) string {
 	return "  "
 }
 
+// detailNewlineMarker is rendered in place of any newline (LF / CR / CRLF)
+// found in a detail body line. It guarantees that one logical row never
+// spans more than one physical terminal row, which keeps the detail panel
+// within its allocated height even when Redis values contain embedded
+// newlines.
+const detailNewlineMarker = "↵"
+
+// sanitizeDetailRow replaces every newline sequence in s with a visible
+// marker so the result is safe to render as a single physical terminal
+// line. The fast path is a ContainsAny check so strings without any
+// newline go through unchanged.
+func sanitizeDetailRow(s string) string {
+	if !strings.ContainsAny(s, "\r\n") {
+		return s
+	}
+	s = strings.ReplaceAll(s, "\r\n", detailNewlineMarker)
+	s = strings.ReplaceAll(s, "\n", detailNewlineMarker)
+	s = strings.ReplaceAll(s, "\r", detailNewlineMarker)
+	return s
+}
+
 // renderCompositeRow renders a single row of a composite detail (hash,
 // list, set, zset, stream) with the appropriate cursor / active-match
 // styling. lineFn builds the raw text for the row; this helper decides how
@@ -515,7 +536,7 @@ func compositeRowPrefix(i int, inDetail bool, cursor int) string {
 //   - any other row: normalStyle with matched substring wrapped in
 //     searchMatchStyle.
 func (m *Model) renderCompositeRow(query string, inDetail bool, idx int, lineFn func() string) []string {
-	line := lineFn()
+	line := sanitizeDetailRow(lineFn())
 	isCursor := inDetail && idx == m.DetailCursor
 	isActive := isCursor && m.isActiveDetailMatch(idx)
 	switch {
@@ -982,6 +1003,10 @@ func highlightAllWithStyle(s, query string, style lipgloss.Style) string {
 }
 
 func chunkString(s string, size int) []string {
+	// Sanitize first: a chunk that contains a real newline would render as
+	// multiple physical terminal rows and overflow the detail panel. The
+	// visible marker preserves the cue that the value had a newline.
+	s = sanitizeDetailRow(s)
 	if len(s) <= size {
 		return []string{s}
 	}

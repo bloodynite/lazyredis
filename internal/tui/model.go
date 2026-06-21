@@ -115,9 +115,11 @@ type Model struct {
 	DetailSearchFocus bool
 	// DetailSearchMatches holds the positions of every match produced by the
 	// most recent detail search apply. For strings each entry is a byte index
-	// of a substring occurrence; for composite types it is the item index of
-	// the matching entry. DetailSearchCursor is the active match index inside
-	// this slice (-1 when empty).
+	// of a substring occurrence in the sanitized detail value (newlines
+	// collapsed to the visible marker, the same text the renderer chunks);
+	// for composite types it is the item index of the matching entry.
+	// DetailSearchCursor is the active match index inside this slice (-1
+	// when empty).
 	DetailSearchMatches []int
 	DetailSearchCursor  int
 

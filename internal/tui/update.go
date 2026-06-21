@@ -401,20 +401,27 @@ func (m *Model) applyDetailSearch(prevCursor int, preserveCursor bool) int {
 // indices. count mirrors applyDetailSearch's previous return value (raw
 // occurrence count for strings, item count for composites) so status text
 // stays consistent with the old implementation.
+//
+// String search runs against the same sanitized text the renderer feeds
+// to chunkString (newlines collapsed to a visible marker). Without that
+// alignment, a raw byte offset into the unsanitized value points at a
+// completely different chunk than the renderer shows, so the scroll
+// jump lands on a row that has no match.
 func computeDetailSearchMatches(d *store.KeyDetail, query string) (matches []int, count int) {
 	if query == "" {
 		return nil, 0
 	}
 	switch d.Meta.Type {
 	case "string":
-		count = strings.Count(d.String, query)
+		haystack := sanitizeDetailRow(d.String)
+		count = strings.Count(haystack, query)
 		if count == 0 {
 			return nil, 0
 		}
 		matches = make([]int, 0, count)
 		cursor := 0
 		for {
-			idx := strings.Index(d.String[cursor:], query)
+			idx := strings.Index(haystack[cursor:], query)
 			if idx < 0 {
 				break
 			}

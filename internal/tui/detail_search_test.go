@@ -190,6 +190,59 @@ func TestDetailSearchMovesCursorForList(t *testing.T) {
 	}
 }
 
+// TestDetailSearchMultilineStringScrollsToMatch proves that the search
+// math and the scroll math are both expressed in the same sanitized text
+// the renderer uses. A string with many embedded newlines would otherwise
+// get its raw byte offset indexed against the chunked sanitized render,
+// landing the scroll on a chunk that has no "needle" at all.
+func TestDetailSearchMultilineStringScrollsToMatch(t *testing.T) {
+	m := New()
+	m.Width = 100
+	m.Height = 24
+	m.Screen = ScreenBrowser
+	m.Client = &store.Client{}
+	m.Info = &store.ServerInfo{Version: "7.2", UsedMemory: "1M", TotalKeys: 1}
+	m.PanelFocus = panelDetail
+	m.SelectedKey = "k"
+	m.KeyDetail = &store.KeyDetail{
+		Meta:   store.KeyMeta{Type: "string", Key: "k"},
+		String: strings.Repeat("\n", 1200) + "needle",
+	}
+
+	next, _ := m.Update(keyRune('/'))
+	m = next.(*Model)
+	m = typeQuery(m, "needle")
+	next, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = next.(*Model)
+	if m.Status != "1 match" {
+		t.Fatalf("status = %q, want \"1 match\"", m.Status)
+	}
+	if m.DetailScroll <= 0 {
+		t.Fatalf("scroll must advance into the body to reveal the match, got %d", m.DetailScroll)
+	}
+
+	// The match must be visible in the rendered body and the panel must
+	// stay at its allocated height. This is the symptom from the blocker:
+	// raw byte offset would land the scroll on a chunk full of newline
+	// markers, never revealing "needle".
+	_, rightW := m.browserPanelWidths()
+	panelW := rightW - panelChromeCols
+	height := m.browserContentHeight()
+	panel := m.renderDetailPanel(panelW, height)
+	lines := strings.Split(panel, "\n")
+	if len(lines) != height {
+		t.Fatalf("panel lines = %d, want %d (scroll=%d)", len(lines), height, m.DetailScroll)
+	}
+	if !strings.Contains(panel, "needle") {
+		t.Fatalf("rendered body does not contain 'needle' after search; scroll=%d panel=%q", m.DetailScroll, panel)
+	}
+	// The chunk that holds the active match must carry the active highlight.
+	activeMarker := activeSearchMatchStyle.Render("needle")
+	if !strings.Contains(panel, activeMarker) {
+		t.Fatalf("expected active highlight around 'needle' in rendered body; got %q", panel)
+	}
+}
+
 func TestDetailSearchEscExits(t *testing.T) {
 	m := New()
 	m.Width = 100

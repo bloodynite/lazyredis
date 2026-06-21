@@ -179,3 +179,172 @@ func TestViewShowsInfoRowsOnTop(t *testing.T) {
 		t.Fatalf("info line 2 = %q, want server stats", lines[1])
 	}
 }
+
+// TestDetailPanelHeightFitsWithMultilineString proves that a string value
+// containing embedded newlines never pushes the detail panel beyond its
+// allocated height.
+func TestDetailPanelHeightFitsWithMultilineString(t *testing.T) {
+	m := New()
+	m.Width = 100
+	m.Height = 24
+	m.Screen = ScreenBrowser
+	m.Client = &store.Client{}
+	m.Config = &config.File{}
+	m.Keys = []string{"demo:key"}
+	// A value rich in newlines: any chunk that kept the real "\n" would
+	// render as multiple physical terminal rows, overflowing the panel.
+	m.KeyDetail = &store.KeyDetail{
+		Meta:   store.KeyMeta{Type: "string", Key: "demo:key"},
+		String: "alpha\nbeta\ngamma\n\ndelta\nepsilon\r\nzeta",
+	}
+
+	out := m.View()
+	lines := strings.Split(out, "\n")
+	if len(lines) != m.Height {
+		t.Fatalf("view lines = %d, want %d", len(lines), m.Height)
+	}
+	// Header must stay at the top even when the value contains newlines.
+	if !strings.Contains(lines[0], "Lazyredis") {
+		t.Fatalf("header missing in line 0: %q", lines[0])
+	}
+	// The visible marker should appear in the rendered body so the user
+	// still sees the value had embedded newlines.
+	if !strings.Contains(out, detailNewlineMarker) {
+		t.Fatalf("expected newline marker %q in view output", detailNewlineMarker)
+	}
+}
+
+// TestDetailPanelHeightFitsWithMultilineHash proves the same property for
+// a hash whose field values contain embedded newlines.
+func TestDetailPanelHeightFitsWithMultilineHash(t *testing.T) {
+	m := New()
+	m.Width = 100
+	m.Height = 24
+	m.Screen = ScreenBrowser
+	m.Client = &store.Client{}
+	m.Config = &config.File{}
+	m.Keys = []string{"demo:hash"}
+	m.KeyDetail = &store.KeyDetail{
+		Meta: store.KeyMeta{Type: "hash", Key: "demo:hash"},
+		Hash: map[string]string{
+			"f1": "line1\nline2\nline3",
+			"f2": "alpha\nbeta\ngamma\ndelta",
+			"f3": "single\nline",
+		},
+	}
+
+	out := m.View()
+	lines := strings.Split(out, "\n")
+	if len(lines) != m.Height {
+		t.Fatalf("view lines = %d, want %d", len(lines), m.Height)
+	}
+	if !strings.Contains(out, detailNewlineMarker) {
+		t.Fatalf("expected newline marker %q in view output", detailNewlineMarker)
+	}
+}
+
+// TestDetailPanelHeightFitsWithMultilineList proves the same property for
+// a list whose items contain embedded newlines.
+func TestDetailPanelHeightFitsWithMultilineList(t *testing.T) {
+	m := New()
+	m.Width = 100
+	m.Height = 24
+	m.Screen = ScreenBrowser
+	m.Client = &store.Client{}
+	m.Config = &config.File{}
+	m.Keys = []string{"demo:list"}
+	m.KeyDetail = &store.KeyDetail{
+		Meta:  store.KeyMeta{Type: "list", Key: "demo:list"},
+		List:  []string{"a\nb\nc", "d\ne", "f\ng\nh\ni\nj"},
+	}
+
+	out := m.View()
+	lines := strings.Split(out, "\n")
+	if len(lines) != m.Height {
+		t.Fatalf("view lines = %d, want %d", len(lines), m.Height)
+	}
+	if !strings.Contains(out, detailNewlineMarker) {
+		t.Fatalf("expected newline marker %q in view output", detailNewlineMarker)
+	}
+}
+
+// TestDetailPanelHeightFitsWithMultilineSet proves the same property for
+// a set whose members contain embedded newlines.
+func TestDetailPanelHeightFitsWithMultilineSet(t *testing.T) {
+	m := New()
+	m.Width = 100
+	m.Height = 24
+	m.Screen = ScreenBrowser
+	m.Client = &store.Client{}
+	m.Config = &config.File{}
+	m.Keys = []string{"demo:set"}
+	m.KeyDetail = &store.KeyDetail{
+		Meta: store.KeyMeta{Type: "set", Key: "demo:set"},
+		Set:  []string{"alpha\nbeta", "gamma\ndelta\nepsilon"},
+	}
+
+	out := m.View()
+	lines := strings.Split(out, "\n")
+	if len(lines) != m.Height {
+		t.Fatalf("view lines = %d, want %d", len(lines), m.Height)
+	}
+	if !strings.Contains(out, detailNewlineMarker) {
+		t.Fatalf("expected newline marker %q in view output", detailNewlineMarker)
+	}
+}
+
+// TestRenderDetailPanelExactHeightMultiline proves the panel body itself
+// (not just the full View) stays at its allocated height when a single
+// composite row contains an embedded newline.
+func TestRenderDetailPanelExactHeightMultiline(t *testing.T) {
+	m := New()
+	m.Width = 100
+	m.Height = 24
+	m.Screen = ScreenBrowser
+	m.Client = &store.Client{}
+	m.Keys = []string{"k"}
+	m.SelectedKey = "k"
+	_, rightW := m.browserPanelWidths()
+	panelW := rightW - panelChromeCols
+	height := m.browserContentHeight()
+
+	m.KeyDetail = &store.KeyDetail{
+		Meta: store.KeyMeta{Type: "list", Key: "k"},
+		List: []string{"one\ntwo\nthree\nfour", "five", "six\nseven"},
+	}
+
+	panel := m.renderDetailPanel(panelW, height)
+	lines := strings.Split(panel, "\n")
+	if len(lines) != height {
+		t.Fatalf("detail panel lines = %d, want %d", len(lines), height)
+	}
+	// The marker must appear in the rendered body so the user can see the
+	// value had embedded newlines.
+	if !strings.Contains(panel, detailNewlineMarker) {
+		t.Fatalf("expected newline marker %q in detail panel", detailNewlineMarker)
+	}
+}
+
+// TestSanitizeDetailRowFastPath is a small unit test on the helper itself
+// so future regressions on the marker logic get caught fast.
+func TestSanitizeDetailRowFastPath(t *testing.T) {
+	cases := []struct {
+		name string
+		in   string
+		want string
+	}{
+		{"empty", "", ""},
+		{"no newline", "hello world", "hello world"},
+		{"lf", "a\nb", "a" + detailNewlineMarker + "b"},
+		{"crlf", "a\r\nb", "a" + detailNewlineMarker + "b"},
+		{"bare cr", "a\rb", "a" + detailNewlineMarker + "b"},
+		{"multiple", "a\nb\r\nc\rd", "a" + detailNewlineMarker + "b" + detailNewlineMarker + "c" + detailNewlineMarker + "d"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := sanitizeDetailRow(tc.in); got != tc.want {
+				t.Fatalf("sanitizeDetailRow(%q) = %q, want %q", tc.in, got, tc.want)
+			}
+		})
+	}
+}
