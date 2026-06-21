@@ -38,7 +38,7 @@ func (m *Model) View() string {
 	if m.HelpOpen {
 		out = m.applyHelpOverlay(out)
 	}
-	return out
+	return fitViewHeight(out, m.Height)
 }
 
 func (m *Model) viewDisconnectedLayout() string {
@@ -222,9 +222,43 @@ func (m *Model) renderBrowserPanels() string {
 		rightStyle = panelFocusedStyle
 	}
 
-	left := leftStyle.Width(leftW-panelHorizontalPadding).Height(height).Render(m.renderKeysPanel(leftW-panelChromeCols, height))
-	right := rightStyle.Width(rightW-panelHorizontalPadding).Height(height).Render(m.renderDetailPanel(rightW-panelChromeCols, height))
+	left := renderTitledPanel(leftStyle, leftW, height, "Keys", m.renderKeysPanel(leftW-panelChromeCols, height))
+	right := renderTitledPanel(rightStyle, rightW, height, "Detail", m.renderDetailPanel(rightW-panelChromeCols, height))
 	return lipgloss.JoinHorizontal(lipgloss.Top, left, right)
+}
+
+func renderTitledPanel(style lipgloss.Style, outerWidth, height int, title, body string) string {
+	panel := style.Width(outerWidth-panelHorizontalPadding).Height(height).Render(body)
+	return injectPanelTitle(panel, title, style)
+}
+
+func injectPanelTitle(panel, title string, style lipgloss.Style) string {
+	if title == "" {
+		return panel
+	}
+
+	lines := strings.Split(panel, "\n")
+	if len(lines) == 0 {
+		return panel
+	}
+
+	topWidth := lipgloss.Width(lines[0])
+	if topWidth < 4 {
+		return panel
+	}
+
+	title = truncatePlain(title, topWidth-4)
+	label := " " + panelTitleStyle.Render(title) + " "
+	fillerWidth := topWidth - 2 - lipgloss.Width(label)
+	if fillerWidth < 0 {
+		fillerWidth = 0
+	}
+
+	borderStyle := lipgloss.NewStyle().
+		Foreground(style.GetBorderTopForeground()).
+		Background(style.GetBorderTopBackground())
+	lines[0] = borderStyle.Render("┌") + label + borderStyle.Render(strings.Repeat("─", fillerWidth)) + borderStyle.Render("┐")
+	return strings.Join(lines, "\n")
 }
 
 func clipPanelLines(lines []string, maxLines int) string {
@@ -351,6 +385,12 @@ func (m *Model) renderDetailPanel(panelW, height int) string {
 	}
 
 	d := m.KeyDetail
+	extraRows := 0
+	if m.DetailSearchFocus {
+		m.DetailSearchInput.Width = max(4, panelW-6)
+		lines = append(lines, m.DetailSearchInput.View())
+		extraRows = 1
+	}
 	lines = append(lines,
 		fmt.Sprintf("  %s  %s",
 			typeStyle(d.Meta.Type).Render(d.Meta.Type),
@@ -358,97 +398,142 @@ func (m *Model) renderDetailPanel(panelW, height int) string {
 		),
 	)
 
-	listH := max(1, height-2)
-	body := m.renderDetailBody(d, panelW, listH)
+	listH := max(1, height-2-extraRows)
+	query := m.detailSearchQuery()
+	body := m.renderDetailBody(d, panelW, listH, query)
 	lines = append(lines, body...)
 	return clipPanelLines(lines, height)
 }
 
-func (m *Model) renderDetailBody(d *store.KeyDetail, panelW, listH int) []string {
+// detailSearchQuery returns the active query for highlighting in the detail
+// panel, or "" when no query is currently active.
+func (m *Model) detailSearchQuery() string {
+	if m.DetailSearchInput.Value() == "" {
+		return ""
+	}
+	if m.DetailSearchFocus {
+		return ""
+	}
+	return m.DetailSearchInput.Value()
+}
+
+// isActiveDetailMatch reports whether the detail item at composite index idx
+// is the match the user is currently navigated to via n/N. For strings,
+// where matches are byte offsets not item indices, this is always false —
+// the string path computes the active chunk directly from
+// DetailSearchMatches/DetailSearchCursor.
+func (m *Model) isActiveDetailMatch(idx int) bool {
+	if m.DetailSearchCursor < 0 || m.DetailSearchCursor >= len(m.DetailSearchMatches) {
+		return false
+	}
+	return m.DetailSearchMatches[m.DetailSearchCursor] == idx
+}
+
+func (m *Model) renderDetailBody(d *store.KeyDetail, panelW, listH int, query string) []string {
 	var lines []string
 	inDetail := m.PanelFocus == panelDetail
 
 	switch d.Meta.Type {
 	case "string":
-		lines = append(lines, wrapValue("value", d.String, panelW, listH)...)
+		// For strings, the active match is a byte offset into the value.
+		// Translate it to (chunkIdx, offsetWithinChunk) so the chunk
+		// containing the navigated match can highlight it distinctly.
+		activeChunk, activeOffset := -1, -1
+		if m.DetailSearchCursor >= 0 && m.DetailSearchCursor < len(m.DetailSearchMatches) {
+			maxW := max(8, panelW-4)
+			pos := m.DetailSearchMatches[m.DetailSearchCursor]
+			activeChunk = pos / maxW
+			activeOffset = pos % maxW
+		}
+		lines = append(lines, wrapValueWithQuery("value", d.String, query, panelW, listH, m.DetailScroll, activeChunk, activeOffset)...)
 	case "hash":
 		fields := hashFields(d.Hash)
 		end := min(len(fields), m.DetailScroll+listH)
 		for i := m.DetailScroll; i < end; i++ {
-			f := fields[i]
-			prefix := "  "
-			if i == m.DetailCursor && inDetail {
-				prefix = "▸ "
-			}
-			val := truncate(d.Hash[f], max(8, panelW-lipgloss.Width(f)-6))
-			line := fmt.Sprintf("%s%s = %s", prefix, f, val)
-			if i == m.DetailCursor && inDetail {
-				lines = append(lines, selectedStyle.Render(line))
-			} else {
-				lines = append(lines, normalStyle.Render(line))
-			}
+			lines = append(lines, m.renderCompositeRow(query, inDetail, i, func() string {
+				f := fields[i]
+				val := truncate(d.Hash[f], max(8, panelW-lipgloss.Width(f)-6))
+				return fmt.Sprintf("%s%s = %s", compositeRowPrefix(i, inDetail, m.DetailCursor), f, val)
+			})...)
 		}
 	case "list":
 		end := min(len(d.List), m.DetailScroll+listH)
 		for i := m.DetailScroll; i < end; i++ {
-			prefix := "  "
-			if i == m.DetailCursor && inDetail {
-				prefix = "▸ "
-			}
-			line := fmt.Sprintf("%s[%d] %s", prefix, i, truncate(d.List[i], max(8, panelW-8)))
-			if i == m.DetailCursor && inDetail {
-				lines = append(lines, selectedStyle.Render(line))
-			} else {
-				lines = append(lines, normalStyle.Render(line))
-			}
+			lines = append(lines, m.renderCompositeRow(query, inDetail, i, func() string {
+				val := truncate(d.List[i], max(8, panelW-8))
+				return fmt.Sprintf("%s[%d] %s", compositeRowPrefix(i, inDetail, m.DetailCursor), i, val)
+			})...)
 		}
 	case "set":
 		end := min(len(d.Set), m.DetailScroll+listH)
 		for i := m.DetailScroll; i < end; i++ {
-			prefix := "  "
-			if i == m.DetailCursor && inDetail {
-				prefix = "▸ "
-			}
-			line := prefix + truncate(d.Set[i], max(8, panelW-4))
-			if i == m.DetailCursor && inDetail {
-				lines = append(lines, selectedStyle.Render(line))
-			} else {
-				lines = append(lines, normalStyle.Render(line))
-			}
+			lines = append(lines, m.renderCompositeRow(query, inDetail, i, func() string {
+				val := truncate(d.Set[i], max(8, panelW-4))
+				return compositeRowPrefix(i, inDetail, m.DetailCursor) + val
+			})...)
 		}
 	case "zset":
 		end := min(len(d.ZSet), m.DetailScroll+listH)
 		for i := m.DetailScroll; i < end; i++ {
 			z := d.ZSet[i]
-			prefix := "  "
-			if i == m.DetailCursor && inDetail {
-				prefix = "▸ "
-			}
-			line := fmt.Sprintf("%s%s (%.2f)", prefix, z.Member, z.Score)
-			if i == m.DetailCursor && inDetail {
-				lines = append(lines, selectedStyle.Render(line))
-			} else {
-				lines = append(lines, normalStyle.Render(line))
-			}
+			lines = append(lines, m.renderCompositeRow(query, inDetail, i, func() string {
+				return fmt.Sprintf("%s%s (%.2f)", compositeRowPrefix(i, inDetail, m.DetailCursor), z.Member, z.Score)
+			})...)
 		}
 	case "stream":
 		end := min(len(d.Stream), m.DetailScroll+listH)
 		for i := m.DetailScroll; i < end; i++ {
 			entry := d.Stream[i]
-			prefix := "  "
-			if i == m.DetailCursor && inDetail {
-				prefix = "▸ "
-			}
-			body := truncate(formatStreamEntry(entry), max(8, panelW-12))
-			line := fmt.Sprintf("%s%s  %s", prefix, entry.ID, body)
-			if i == m.DetailCursor && inDetail {
-				lines = append(lines, selectedStyle.Render(line))
-			} else {
-				lines = append(lines, normalStyle.Render(line))
-			}
+			lines = append(lines, m.renderCompositeRow(query, inDetail, i, func() string {
+				body := truncate(formatStreamEntry(entry), max(8, panelW-12))
+				return fmt.Sprintf("%s%s  %s", compositeRowPrefix(i, inDetail, m.DetailCursor), entry.ID, body)
+			})...)
 		}
 	}
 	return lines
+}
+
+// compositeRowPrefix returns the leading glyph for a composite detail row,
+// using "▸ " for the cursor row and "  " otherwise.
+func compositeRowPrefix(i int, inDetail bool, cursor int) string {
+	if inDetail && i == cursor {
+		return "▸ "
+	}
+	return "  "
+}
+
+// renderCompositeRow renders a single row of a composite detail (hash,
+// list, set, zset, stream) with the appropriate cursor / active-match
+// styling. lineFn builds the raw text for the row; this helper decides how
+// to style it:
+//
+//   - active match row (cursor on the n/N-selected match with an applied
+//     query): matched substring wrapped in activeSearchMatchStyle, rest of
+//     the row uses normalStyle so the active highlight is visible.
+//   - cursor row without active search: full row wrapped in selectedStyle
+//     (existing reverse-video cursor behavior).
+//   - any other row: normalStyle with matched substring wrapped in
+//     searchMatchStyle.
+func (m *Model) renderCompositeRow(query string, inDetail bool, idx int, lineFn func() string) []string {
+	line := lineFn()
+	isCursor := inDetail && idx == m.DetailCursor
+	isActive := isCursor && m.isActiveDetailMatch(idx)
+	switch {
+	case isActive && query != "":
+		// Active match: highlight matched substring with activeSearchMatchStyle
+		// and skip selectedStyle so the active highlight is visible.
+		rendered := normalStyle.Render(line)
+		rendered = highlightAllWithStyle(rendered, query, activeSearchMatchStyle)
+		return []string{rendered}
+	case isCursor:
+		return []string{selectedStyle.Render(line)}
+	default:
+		rendered := normalStyle.Render(line)
+		if query != "" {
+			rendered = highlightSubstring(rendered, query)
+		}
+		return []string{rendered}
+	}
 }
 
 func formatStreamEntry(entry store.StreamEntry) string {
@@ -738,19 +823,32 @@ func (m *Model) applyHelpOverlay(base string) string {
 }
 
 func (m *Model) renderHelpModal() string {
-	defs := m.applicableHelpActions()
+	groups := m.helpGroups()
 	var lines []string
 	lines = append(lines, panelTitleStyle.Render("Keyboard shortcuts"))
 	lines = append(lines, "")
-	for _, def := range defs {
-		lines = append(lines, fmt.Sprintf("  %-16s %s", formatBindKeys(m.bindKeys(def.id)), def.desc))
+	for _, g := range groups {
+		// Always emit the heading (even if the group has no entries right
+		// now) so the user can see the full layout of scopes for this
+		// screen — e.g. "Browser · Detail panel" stays visible when no
+		// key is selected.
+		if g.Title != "" {
+			lines = append(lines, helpGroupTitleStyle.Render(g.Title))
+		}
+		for _, def := range g.Defs {
+			lines = append(lines, fmt.Sprintf("  %-16s %s", formatBindKeys(m.bindKeys(def.id)), def.desc))
+		}
+		// Insert a blank separator between groups even when the group body
+		// is empty, so headings never visually collide.
+		lines = append(lines, "")
 	}
-	lines = append(lines,
-		fmt.Sprintf("  %-16s %s", formatBindKeys(m.bindKeys(actionAppHelp)), "toggle this help"),
-		fmt.Sprintf("  %-16s %s", formatBindKeys(m.bindKeys(actionAppForceQuit)), "force quit"),
-	)
+	// Trim trailing blank so the modal does not gain an empty line at the
+	// bottom when we already added one above.
+	if len(lines) > 0 && lines[len(lines)-1] == "" {
+		lines = lines[:len(lines)-1]
+	}
 	lines = append(lines, "",
-		confirmHintStyle.Render("Customize save shortcuts with settings.shortcut_modifier"),
+		confirmHintStyle.Render("Customize shortcut modifier with settings.shortcut_modifier"),
 		confirmHintStyle.Render("Use ctrl or alt"),
 		"",
 		confirmHintStyle.Render("Press ? or esc to close"),
@@ -771,22 +869,116 @@ func appHeaderPrefix() string {
 	return "Lazyredis " + appVersion()
 }
 
-func wrapValue(label, value string, width, maxLines int) []string {
+func fitViewHeight(out string, height int) string {
+	if height <= 0 {
+		return out
+	}
+	lines := strings.Split(out, "\n")
+	if len(lines) > height {
+		lines = lines[:height]
+	}
+	for len(lines) < height {
+		lines = append(lines, "")
+	}
+	return strings.Join(lines, "\n")
+}
+
+func wrapValue(label, value string, width, maxLines, scroll int) []string {
+	return wrapValueWithQuery(label, value, "", width, maxLines, scroll, -1, -1)
+}
+
+func wrapValueWithQuery(label, value, query string, width, maxLines, scroll, activeChunk, activeOffset int) []string {
 	if maxLines < 1 {
 		maxLines = 1
 	}
 	maxW := max(8, width-4)
+	chunks := chunkString(value, maxW)
+	if scroll < 0 {
+		scroll = 0
+	}
+	if scroll > len(chunks) {
+		scroll = len(chunks)
+	}
 	var lines []string
 	lines = append(lines, "  "+label+":")
-	maxLines--
-	for _, chunk := range chunkString(value, maxW) {
-		if maxLines <= 0 {
-			break
+	bodyVisible := maxLines - 1
+	for i, chunk := range chunks[scroll:min(len(chunks), scroll+bodyVisible)] {
+		actualChunkIdx := scroll + i
+		// Highlight the chunk's matches; the chunk that contains the
+		// currently-navigated active match renders that one occurrence in
+		// activeSearchMatchStyle so it stands out from the rest.
+		var rendered string
+		if actualChunkIdx == activeChunk && query != "" {
+			rendered = highlightChunkActive(chunk, query, activeOffset)
+		} else {
+			rendered = highlightSubstring(chunk, query)
 		}
-		lines = append(lines, normalStyle.Render("  "+chunk))
-		maxLines--
+		lines = append(lines, normalStyle.Render("  "+rendered))
 	}
 	return lines
+}
+
+// highlightSubstring returns s with every non-overlapping occurrence of query
+// wrapped in searchMatchStyle. Empty query returns s unchanged.
+func highlightSubstring(s, query string) string {
+	if query == "" {
+		return s
+	}
+	if !strings.Contains(s, query) {
+		return s
+	}
+	return highlightAllWithStyle(s, query, searchMatchStyle)
+}
+
+// highlightChunkActive highlights every non-overlapping occurrence of query in
+// chunk. The occurrence that starts at activeOffset is highlighted with
+// activeSearchMatchStyle; every other occurrence is highlighted with the
+// regular searchMatchStyle. activeOffset < 0 disables the active
+// distinction and behaves like highlightSubstring.
+func highlightChunkActive(chunk, query string, activeOffset int) string {
+	if query == "" || !strings.Contains(chunk, query) {
+		return chunk
+	}
+	if activeOffset < 0 {
+		return highlightAllWithStyle(chunk, query, searchMatchStyle)
+	}
+	var out strings.Builder
+	cursor := 0
+	for {
+		idx := strings.Index(chunk[cursor:], query)
+		if idx < 0 {
+			out.WriteString(chunk[cursor:])
+			break
+		}
+		start := cursor + idx
+		out.WriteString(chunk[cursor:start])
+		style := searchMatchStyle
+		if start == activeOffset {
+			style = activeSearchMatchStyle
+		}
+		out.WriteString(style.Render(chunk[start : start+len(query)]))
+		cursor = start + len(query)
+	}
+	return out.String()
+}
+
+// highlightAllWithStyle wraps every non-overlapping occurrence of query in
+// style. Empty query returns s unchanged.
+func highlightAllWithStyle(s, query string, style lipgloss.Style) string {
+	var out strings.Builder
+	cursor := 0
+	for {
+		idx := strings.Index(s[cursor:], query)
+		if idx < 0 {
+			out.WriteString(s[cursor:])
+			break
+		}
+		start := cursor + idx
+		out.WriteString(s[cursor:start])
+		out.WriteString(style.Render(s[start : start+len(query)]))
+		cursor = start + len(query)
+	}
+	return out.String()
 }
 
 func chunkString(s string, size int) []string {

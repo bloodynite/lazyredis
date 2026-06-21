@@ -111,6 +111,16 @@ type Model struct {
 	SearchInput textinput.Model
 	SearchFocus bool
 
+	DetailSearchInput textinput.Model
+	DetailSearchFocus bool
+	// DetailSearchMatches holds the positions of every match produced by the
+	// most recent detail search apply. For strings each entry is a byte index
+	// of a substring occurrence; for composite types it is the item index of
+	// the matching entry. DetailSearchCursor is the active match index inside
+	// this slice (-1 when empty).
+	DetailSearchMatches []int
+	DetailSearchCursor  int
+
 	PanelFocus panelFocus
 
 	HelpOpen bool
@@ -124,6 +134,11 @@ func New() *Model {
 	search.Placeholder = "text or pattern (e.g. demo, user:*)"
 	search.CharLimit = 200
 	search.Width = 40
+
+	detailSearch := textinput.New()
+	detailSearch.Placeholder = "search value"
+	detailSearch.CharLimit = 200
+	detailSearch.Width = 40
 
 	edit := textinput.New()
 	edit.CharLimit = 10000
@@ -141,15 +156,16 @@ func New() *Model {
 	newKeyValue.SetHeight(6)
 
 	return &Model{
-		Screen:      ScreenProfiles,
-		Spinner:     s,
-		SearchInput: search,
-		EditInput:   edit,
-		FormInputs:  inputs,
-		NewKeyTTL:   newKeyTTL,
-		NewKeyName:  newKeyName,
-		NewKeyValue: newKeyValue,
-		ScanPattern: "*",
+		Screen:            ScreenProfiles,
+		Spinner:           s,
+		SearchInput:       search,
+		DetailSearchInput: detailSearch,
+		EditInput:         edit,
+		FormInputs:        inputs,
+		NewKeyTTL:         newKeyTTL,
+		NewKeyName:        newKeyName,
+		NewKeyValue:       newKeyValue,
+		ScanPattern:       "*",
 	}
 }
 

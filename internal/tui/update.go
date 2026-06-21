@@ -49,7 +49,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.inputFocused() {
 			return m.handleInputKeys(msg)
 		}
-		return m.handleKeyPress(key)
+		return m.handleKeyPress(key, msg)
 
 	case spinner.TickMsg:
 		var cmd tea.Cmd
@@ -163,9 +163,21 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.ErrMsg = msg.err.Error()
 			return m, nil
 		}
+		// Capture the active detail-search match index before replacing the
+		// underlying detail. When the same key refreshes (auto-refresh) we
+		// keep the user on their current match; only a key change resets to
+		// the first match.
+		prevCursor := m.DetailSearchCursor
+		sameKey := m.KeyDetail != nil &&
+			m.KeyDetail.Meta.Key == msg.detail.Meta.Key
 		m.KeyDetail = msg.detail
 		m.DetailCursor = 0
 		m.DetailScroll = 0
+		m.DetailSearchFocus = false
+		m.DetailSearchInput.Blur()
+		if m.DetailSearchInput.Value() != "" {
+			m.applyDetailSearch(prevCursor, sameKey)
+		}
 		return m, nil
 
 	case actionDoneMsg:
@@ -233,6 +245,9 @@ func (m *Model) inputFocused() bool {
 	if m.Screen == ScreenBrowser && m.SearchFocus {
 		return true
 	}
+	if m.Screen == ScreenBrowser && m.DetailSearchFocus {
+		return true
+	}
 	return false
 }
 
@@ -263,6 +278,11 @@ func (m *Model) handleInputKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 	case ScreenBrowser:
+		if m.DetailSearchFocus && m.matchAction(actionBrowserFilterCancel, key) {
+			m.DetailSearchFocus = false
+			m.DetailSearchInput.Blur()
+			return m, nil
+		}
 		if m.SearchFocus && m.matchAction(actionBrowserFilterCancel, key) {
 			m.SearchFocus = false
 			m.SearchInput.Blur()
@@ -285,6 +305,21 @@ func (m *Model) handleInputKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		return m.updateEditInput(msg)
 	case ScreenBrowser:
+		if m.DetailSearchFocus {
+			var cmd tea.Cmd
+			m.DetailSearchInput, cmd = m.DetailSearchInput.Update(msg)
+			if m.matchAction(actionBrowserFilterApply, key) {
+				m.DetailSearchFocus = false
+				m.DetailSearchInput.Blur()
+				count := m.applyDetailSearch(0, false)
+				msg := detailSearchStatus(count)
+				m.Status = msg
+				m.statusClearGen++
+				gen := m.statusClearGen
+				return m, tea.Batch(cmd, clearStatusAfter(statusMessageDuration, gen))
+			}
+			return m, cmd
+		}
 		var cmd tea.Cmd
 		m.SearchInput, cmd = m.SearchInput.Update(msg)
 		if m.matchAction(actionBrowserFilterApply, key) {
@@ -317,12 +352,200 @@ func (m *Model) applySearchPattern() (*Model, tea.Cmd) {
 	return m, scanKeys(m.Client, 0, m.ScanPattern, false, m.scanGen)
 }
 
-func (m *Model) handleKeyPress(key string) (tea.Model, tea.Cmd) {
+// applyDetailSearch scrolls or moves the detail cursor to the first match
+// for the current DetailSearchInput query and returns the total number of
+// matches found across the detail. Empty query is a no-op and returns 0.
+//
+// On success the match positions and an active cursor pointing at the first
+// match are stored on the model so that n/N can cycle through them.
+//
+// prevCursor and preserveCursor control how the active cursor is positioned
+// when matches exist. By default (preserveCursor false, or prevCursor < 0)
+// the cursor lands on the first match. When preserveCursor is true the
+// cursor stays on prevCursor; if prevCursor falls outside the new match
+// range it clamps to the last match. This keeps the user's navigated
+// position stable across auto-refreshes of the same key.
+func (m *Model) applyDetailSearch(prevCursor int, preserveCursor bool) int {
+	if m.KeyDetail == nil {
+		m.DetailSearchMatches = nil
+		m.DetailSearchCursor = -1
+		return 0
+	}
+	query := m.DetailSearchInput.Value()
+	if query == "" {
+		m.DetailSearchMatches = nil
+		m.DetailSearchCursor = -1
+		return 0
+	}
+	matches, count := computeDetailSearchMatches(m.KeyDetail, query)
+	m.DetailSearchMatches = matches
+	if len(matches) > 0 {
+		target := 0
+		switch {
+		case preserveCursor && prevCursor >= 0 && prevCursor < len(matches):
+			target = prevCursor
+		case preserveCursor && prevCursor >= len(matches):
+			target = len(matches) - 1
+		}
+		m.DetailSearchCursor = target
+		m.jumpToDetailSearchMatch(target)
+	} else {
+		m.DetailSearchCursor = -1
+	}
+	return count
+}
+
+// computeDetailSearchMatches returns every match position in d for query, in
+// document order. For strings positions are byte indices of each non-
+// overlapping substring occurrence; for composite types they are item
+// indices. count mirrors applyDetailSearch's previous return value (raw
+// occurrence count for strings, item count for composites) so status text
+// stays consistent with the old implementation.
+func computeDetailSearchMatches(d *store.KeyDetail, query string) (matches []int, count int) {
+	if query == "" {
+		return nil, 0
+	}
+	switch d.Meta.Type {
+	case "string":
+		count = strings.Count(d.String, query)
+		if count == 0 {
+			return nil, 0
+		}
+		matches = make([]int, 0, count)
+		cursor := 0
+		for {
+			idx := strings.Index(d.String[cursor:], query)
+			if idx < 0 {
+				break
+			}
+			start := cursor + idx
+			matches = append(matches, start)
+			cursor = start + len(query)
+		}
+		return matches, count
+	case "hash":
+		fields := hashFields(d.Hash)
+		for i, f := range fields {
+			if strings.Contains(f, query) || strings.Contains(d.Hash[f], query) {
+				count++
+				matches = append(matches, i)
+			}
+		}
+	case "list":
+		for i, v := range d.List {
+			if strings.Contains(v, query) {
+				count++
+				matches = append(matches, i)
+			}
+		}
+	case "set":
+		for i, v := range d.Set {
+			if strings.Contains(v, query) {
+				count++
+				matches = append(matches, i)
+			}
+		}
+	case "zset":
+		for i, z := range d.ZSet {
+			member, _ := z.Member.(string)
+			if strings.Contains(member, query) ||
+				strings.Contains(strconv.FormatFloat(z.Score, 'f', -1, 64), query) {
+				count++
+				matches = append(matches, i)
+			}
+		}
+	case "stream":
+		for i, e := range d.Stream {
+			if strings.Contains(e.ID, query) || strings.Contains(formatStreamEntry(e), query) {
+				count++
+				matches = append(matches, i)
+			}
+		}
+	}
+	return matches, count
+}
+
+// jumpToDetailSearchMatch scrolls the detail panel so the match at
+// idxInMatches becomes visible and (for composite types) moves the
+// DetailCursor onto it. idxInIndexes is an index into
+// DetailSearchMatches, not into the underlying value.
+func (m *Model) jumpToDetailSearchMatch(idxInMatches int) {
+	if m.KeyDetail == nil || idxInMatches < 0 || idxInMatches >= len(m.DetailSearchMatches) {
+		return
+	}
+	d := m.KeyDetail
+	pos := m.DetailSearchMatches[idxInMatches]
+	if d.Meta.Type == "string" {
+		_, rightW := m.browserPanelWidths()
+		panelW := rightW - panelChromeCols
+		if panelW < 1 {
+			panelW = 1
+		}
+		visible := max(1, m.browserContentHeight()-4)
+		maxW := max(8, panelW-4)
+		chunkIdx := pos / maxW
+		bodyVisible := max(1, visible-1)
+		limit := stringDetailScrollLimit(d.String, panelW, visible)
+		target := chunkIdx - bodyVisible/2
+		if target < 0 {
+			target = 0
+		}
+		if target > limit {
+			target = limit
+		}
+		m.DetailScroll = target
+		return
+	}
+	m.DetailCursor = pos
+	m.adjustDetailScroll()
+}
+
+// cycleDetailMatch advances the active match cursor by delta (positive moves
+// forward, negative backward) and jumps to the new match. Wraps around.
+// No-op when there are no stored matches.
+func (m *Model) cycleDetailMatch(delta int) {
+	n := len(m.DetailSearchMatches)
+	if n == 0 {
+		return
+	}
+	next := (m.DetailSearchCursor + delta) % n
+	if next < 0 {
+		next += n
+	}
+	m.DetailSearchCursor = next
+	m.jumpToDetailSearchMatch(next)
+}
+
+// detailSearchNavStatus formats the match-position status shown after a
+// next/prev navigation jump (e.g. "match 2/7"). Returns "no matches" when
+// the slice is empty.
+func (m *Model) detailSearchNavStatus() string {
+	n := len(m.DetailSearchMatches)
+	if n == 0 {
+		return "no matches"
+	}
+	return fmt.Sprintf("match %d/%d", m.DetailSearchCursor+1, n)
+}
+
+// detailSearchStatus formats the match-count status line shown after a
+// detail search runs.
+func detailSearchStatus(count int) string {
+	switch count {
+	case 0:
+		return "no matches"
+	case 1:
+		return "1 match"
+	default:
+		return fmt.Sprintf("%d matches", count)
+	}
+}
+
+func (m *Model) handleKeyPress(key string, msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch m.Screen {
 	case ScreenProfiles:
 		return m.handleProfilesKeys(key)
 	case ScreenBrowser:
-		return m.handleBrowserKeys(key)
+		return m.handleBrowserKeys(key, msg)
 	case ScreenKeyEdit:
 		return m, nil
 	case ScreenConfirm:
@@ -373,7 +596,35 @@ func (m *Model) handleProfilesKeys(key string) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-func (m *Model) handleBrowserKeys(key string) (tea.Model, tea.Cmd) {
+func (m *Model) handleBrowserKeys(key string, msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	if key == "/" && !m.SearchFocus && !m.DetailSearchFocus &&
+		m.PanelFocus == panelDetail && m.KeyDetail != nil {
+		m.DetailSearchFocus = true
+		m.DetailSearchInput.SetValue("")
+		m.DetailSearchInput.Focus()
+		return m, nil
+	}
+	// Detail search next/prev navigation. Only intercepts when the user is on
+	// the detail panel with an applied query that produced matches; outside
+	// this scope the key falls through to its other bindings (notably
+	// actionBrowserNewKey, which uses "n" on the keys panel).
+	//
+	// The direction is decided from the raw rune rather than matchAction
+	// because the keymap lowercases every key during matching, which would
+	// collapse Shift+N into n and break the prev direction.
+	if m.PanelFocus == panelDetail && m.KeyDetail != nil &&
+		!m.DetailSearchFocus && m.DetailSearchInput.Value() != "" &&
+		len(m.DetailSearchMatches) > 0 &&
+		msg.Type == tea.KeyRunes && len(msg.Runes) == 1 {
+		switch msg.Runes[0] {
+		case 'n':
+			m.cycleDetailMatch(1)
+			return m, m.statusClearCmd(m.detailSearchNavStatus())
+		case 'N':
+			m.cycleDetailMatch(-1)
+			return m, m.statusClearCmd(m.detailSearchNavStatus())
+		}
+	}
 	switch {
 	case m.matchAction(actionBrowserDisconnect, key):
 		if m.Client != nil {
@@ -846,6 +1097,17 @@ func (m *Model) detailMove(delta int) {
 	if m.KeyDetail == nil {
 		return
 	}
+	if m.KeyDetail.Meta.Type == "string" {
+		_, rightW := m.browserPanelWidths()
+		panelW := rightW - panelChromeCols
+		if panelW < 1 {
+			panelW = 1
+		}
+		visible := max(1, m.browserContentHeight()-4)
+		limit := stringDetailScrollLimit(m.KeyDetail.String, panelW, visible)
+		m.DetailScroll = clamp(m.DetailScroll+delta, 0, limit)
+		return
+	}
 	max := detailItemCount(m.KeyDetail) - 1
 	if max < 0 {
 		return
@@ -879,6 +1141,20 @@ func detailItemCount(d *store.KeyDetail) int {
 	default:
 		return 1
 	}
+}
+
+func stringDetailScrollLimit(value string, panelW, listH int) int {
+	if listH < 1 {
+		listH = 1
+	}
+	maxW := max(8, panelW-4)
+	chunks := chunkString(value, maxW)
+	bodyVisible := max(1, listH-1)
+	limit := len(chunks) - bodyVisible
+	if limit < 0 {
+		return 0
+	}
+	return limit
 }
 
 const (
@@ -994,8 +1270,13 @@ func (m *Model) copyableValueText() (string, bool) {
 	}
 }
 
+// elementEditUsesTextarea reports whether the current element edit modal
+// should be rendered and fed by the NewKeyValue textarea. Detail-panel value
+// edits (string/hash/list/set/zset/stream, add or update) all go through the
+// textarea so users can paste multi-line payloads and edit values that span
+// several lines; single-line metadata (field/member/id) lives on EditField.
 func (m *Model) elementEditUsesTextarea() bool {
-	return m.KeyFormType == "stream"
+	return m.EditMode == editElement || m.EditMode == editElementAdd
 }
 
 func (m *Model) openElementEdit(mode editMode) tea.Cmd {
@@ -1003,11 +1284,8 @@ func (m *Model) openElementEdit(mode editMode) tea.Cmd {
 	m.PrevScreen = ScreenBrowser
 	m.Screen = ScreenKeyEdit
 	m.blurEditInputs()
-	if m.elementEditUsesTextarea() {
-		m.syncNewKeyLayout()
-		return m.NewKeyValue.Focus()
-	}
-	return m.EditInput.Focus()
+	m.syncNewKeyLayout()
+	return m.NewKeyValue.Focus()
 }
 
 func (m *Model) startDetailEdit() (tea.Model, tea.Cmd) {
@@ -1016,11 +1294,11 @@ func (m *Model) startDetailEdit() (tea.Model, tea.Cmd) {
 	}
 	d := m.KeyDetail
 	m.KeyFormType = d.Meta.Type
+	m.NewKeyValue.Reset()
 	switch d.Meta.Type {
 	case "string":
-		m.EditInput.SetValue(d.String)
-		m.EditInput.Placeholder = "value"
-		m.EditMode = editElement
+		m.NewKeyValue.SetValue(d.String)
+		m.NewKeyValue.Placeholder = "value"
 		return m, m.openElementEdit(editElement)
 	case "hash":
 		if len(d.Hash) == 0 {
@@ -1029,25 +1307,26 @@ func (m *Model) startDetailEdit() (tea.Model, tea.Cmd) {
 		}
 		field := hashFields(d.Hash)[m.DetailCursor]
 		m.EditField = field
-		m.EditInput.SetValue(field + "=" + d.Hash[field])
-		m.EditInput.Placeholder = "field=value"
+		m.NewKeyValue.SetValue(d.Hash[field])
+		m.NewKeyValue.Placeholder = "value (field: " + field + ")"
 		return m, m.openElementEdit(editElement)
 	case "list":
 		if len(d.List) == 0 {
 			m.ErrMsg = "no items to edit"
 			return m, nil
 		}
-		m.EditInput.SetValue(d.List[m.DetailCursor])
-		m.EditInput.Placeholder = "item value"
+		m.NewKeyValue.SetValue(d.List[m.DetailCursor])
+		m.NewKeyValue.Placeholder = "item value"
 		return m, m.openElementEdit(editElement)
 	case "set":
 		if len(d.Set) == 0 {
 			m.ErrMsg = "no members to edit"
 			return m, nil
 		}
-		m.EditField = d.Set[m.DetailCursor]
-		m.EditInput.SetValue(m.EditField)
-		m.EditInput.Placeholder = "member"
+		member := d.Set[m.DetailCursor]
+		m.EditField = member
+		m.NewKeyValue.SetValue(member)
+		m.NewKeyValue.Placeholder = "member"
 		return m, m.openElementEdit(editElement)
 	case "zset":
 		if len(d.ZSet) == 0 {
@@ -1057,8 +1336,11 @@ func (m *Model) startDetailEdit() (tea.Model, tea.Cmd) {
 		z := d.ZSet[m.DetailCursor]
 		member, _ := z.Member.(string)
 		m.EditField = member
-		m.EditInput.SetValue(store.FormatZSetLine(z.Score, member))
-		m.EditInput.Placeholder = "score<TAB>member"
+		// Use a single-space separator instead of FormatZSetLine's tab so the
+		// textarea (which replaces tabs with 4 spaces) preserves a parseable
+		// "score member" line.
+		m.NewKeyValue.SetValue(strconv.FormatFloat(z.Score, 'g', -1, 64) + " " + member)
+		m.NewKeyValue.Placeholder = "score<TAB>member"
 		return m, m.openElementEdit(editElement)
 	case "stream":
 		if len(d.Stream) == 0 {
@@ -1082,24 +1364,26 @@ func (m *Model) startDetailAdd() (tea.Model, tea.Cmd) {
 	}
 	m.KeyFormType = m.KeyDetail.Meta.Type
 	m.EditField = ""
-	m.EditInput.SetValue("")
+	m.NewKeyValue.Reset()
 	switch m.KeyDetail.Meta.Type {
 	case "hash":
-		m.EditInput.Placeholder = "field=value"
+		m.NewKeyValue.Placeholder = "field=value"
+		return m, m.openElementEdit(editElementAdd)
 	case "list":
-		m.EditInput.Placeholder = "item value"
+		m.NewKeyValue.Placeholder = "item value"
+		return m, m.openElementEdit(editElementAdd)
 	case "set":
-		m.EditInput.Placeholder = "member"
+		m.NewKeyValue.Placeholder = "member"
+		return m, m.openElementEdit(editElementAdd)
 	case "zset":
-		m.EditInput.Placeholder = "score<TAB>member"
+		m.NewKeyValue.Placeholder = "score<TAB>member"
+		return m, m.openElementEdit(editElementAdd)
 	case "stream":
-		m.NewKeyValue.Reset()
 		m.NewKeyValue.Placeholder = "field=value (one per line)"
 		return m, m.openElementEdit(editElementAdd)
 	default:
 		return m, nil
 	}
-	return m, m.openElementEdit(editElementAdd)
 }
 
 func (m *Model) deleteDetailElement() (tea.Model, tea.Cmd) {
@@ -1151,10 +1435,7 @@ func (m *Model) submitElementEdit() (tea.Model, tea.Cmd) {
 	if m.Client == nil || m.KeyDetail == nil {
 		return m, nil
 	}
-	value := strings.TrimSpace(m.EditInput.Value())
-	if m.elementEditUsesTextarea() {
-		value = m.NewKeyValue.Value()
-	}
+	value := strings.TrimSpace(m.NewKeyValue.Value())
 	m.Loading = true
 	key := m.SelectedKey
 	switch m.KeyFormType {
@@ -1167,13 +1448,10 @@ func (m *Model) submitElementEdit() (tea.Model, tea.Cmd) {
 		if m.EditMode == editElementAdd {
 			return m, addHashField(m.Client, key, value)
 		}
-		_, fieldValue, err := store.ParseHashFieldLine(value)
-		if err != nil {
-			m.ErrMsg = err.Error()
-			m.Loading = false
-			return m, nil
-		}
-		return m, patchHashField(m.Client, key, m.EditField, fieldValue)
+		// Edit mode: NewKeyValue carries only the new value; the field name
+		// is preserved on EditField, so we send it straight to patchHashField
+		// without re-parsing a "field=value" line.
+		return m, patchHashField(m.Client, key, m.EditField, value)
 	case "list":
 		if m.EditMode == editElementAdd {
 			return m, appendListItem(m.Client, key, value)
@@ -1183,11 +1461,14 @@ func (m *Model) submitElementEdit() (tea.Model, tea.Cmd) {
 		if m.EditMode == editElementAdd {
 			return m, addSetMember(m.Client, key, value)
 		}
+		// NewKeyValue holds the new member; EditField holds the old member.
 		return m, replaceSetMember(m.Client, key, m.EditField, value)
 	case "zset":
 		if m.EditMode == editElementAdd {
 			return m, addZSetMember(m.Client, key, value)
 		}
+		// NewKeyValue holds "score member" (or pasted "score\tmember");
+		// EditField holds the old member. ParseZSetLine accepts either form.
 		return m, replaceZSetMember(m.Client, key, m.EditField, value)
 	case "stream":
 		if m.EditMode == editElementAdd {
@@ -1259,7 +1540,7 @@ func (m *Model) canAutoRefresh() bool {
 	if m.Screen != ScreenBrowser {
 		return false
 	}
-	if m.Loading || m.SearchFocus || m.HelpOpen {
+	if m.Loading || m.SearchFocus || m.DetailSearchFocus || m.HelpOpen {
 		return false
 	}
 	return true

@@ -33,7 +33,8 @@ func (m *Model) keybarBinds() (main []keyBind, pinned []keyBind) {
 		if m.KeyDetail != nil && m.SelectedKey != "" {
 			pinnedIDs[actionBrowserCopy] = struct{}{}
 		}
-		if m.PanelFocus == panelDetail && m.KeyDetail != nil {
+		if m.PanelFocus == panelDetail && m.KeyDetail != nil && !m.DetailSearchFocus {
+			pinnedIDs[actionBrowserFilter] = struct{}{}
 			if compositeKeyType(m.KeyDetail.Meta.Type) {
 				pinnedIDs[actionBrowserDetailAdd] = struct{}{}
 				pinnedIDs[actionBrowserDetailEdit] = struct{}{}

@@ -77,6 +77,62 @@ func TestViewDoesNotOverflowWithLongString(t *testing.T) {
 	}
 }
 
+func TestViewKeepsHeaderVisibleWithLongValueAndSelection(t *testing.T) {
+	m := New()
+	m.Width = 100
+	m.Height = 24
+	m.Screen = ScreenBrowser
+	m.Client = &store.Client{}
+	m.Info = &store.ServerInfo{Version: "7.2", UsedMemory: "1M", TotalKeys: 3}
+	m.Keys = []string{"key:1", "key:2", "key:3"}
+	m.KeyCursor = 2
+	m.SelectedKey = "key:3"
+	m.PanelFocus = panelDetail
+	m.KeyDetail = &store.KeyDetail{
+		Meta:   store.KeyMeta{Type: "string", Key: "key:3"},
+		String: strings.Repeat("x", 5000),
+	}
+
+	out := m.View()
+	lines := strings.Split(out, "\n")
+	if len(lines) != m.Height {
+		t.Fatalf("view lines = %d, want %d", len(lines), m.Height)
+	}
+	if !strings.Contains(lines[0], "Lazyredis") {
+		t.Fatalf("header missing: %q", lines[0])
+	}
+}
+
+func TestStringDetailScrolls(t *testing.T) {
+	m := New()
+	m.Width = 80
+	m.Height = 24
+	m.Screen = ScreenBrowser
+	m.Client = &store.Client{}
+	m.PanelFocus = panelDetail
+	m.KeyDetail = &store.KeyDetail{
+		Meta:   store.KeyMeta{Type: "string", Key: "demo:key"},
+		String: strings.Repeat("0123456789", 200),
+	}
+
+	_, rightW := m.browserPanelWidths()
+	panelW := rightW - panelChromeCols
+	visible := max(1, m.browserContentHeight()-4)
+	if limit := stringDetailScrollLimit(m.KeyDetail.String, panelW, visible); limit <= 0 {
+		t.Fatalf("expected scroll limit > 0, got %d", limit)
+	}
+
+	first := strings.Join(m.renderDetailBody(m.KeyDetail, panelW, visible, ""), "\n")
+	m.detailMove(1)
+	if m.DetailScroll == 0 {
+		t.Fatal("expected detail scroll to move")
+	}
+	second := strings.Join(m.renderDetailBody(m.KeyDetail, panelW, visible, ""), "\n")
+	if first == second {
+		t.Fatal("expected scrolled value rendering to change")
+	}
+}
+
 func TestViewBrowserPanelsFitWidth(t *testing.T) {
 	m := New()
 	m.Width = 100
