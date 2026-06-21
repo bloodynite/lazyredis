@@ -451,3 +451,22 @@ func removeStreamEntry(client *store.Client, key, id string) tea.Cmd {
 		return actionDoneMsg{status: "entry deleted", reload: true}
 	}
 }
+
+// submitBoundaryFuncs are the patch/add/replace functions that
+// submitElementEdit dispatches to for each Redis write. They are exposed as
+// vars so tests can swap any of them with a recording fake and assert on the
+// exact payload forwarded past the textarea (e.g. that whitespace is not
+// trimmed) without spinning up a real Redis client.
+var (
+	patchStringValueFn    = patchStringValue
+	patchHashFieldFn      = patchHashField
+	addHashFieldFn        = addHashField
+	patchListItemFn       = patchListItem
+	appendListItemFn      = appendListItem
+	addSetMemberFn        = addSetMember
+	replaceSetMemberFn    = replaceSetMember
+	addZSetMemberFn       = addZSetMember
+	replaceZSetMemberFn   = replaceZSetMember
+	addStreamEntryFn      = addStreamEntry
+	replaceStreamEntryFn  = replaceStreamEntry
+)

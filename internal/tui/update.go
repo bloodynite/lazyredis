@@ -1435,7 +1435,12 @@ func (m *Model) submitElementEdit() (tea.Model, tea.Cmd) {
 	if m.Client == nil || m.KeyDetail == nil {
 		return m, nil
 	}
-	value := strings.TrimSpace(m.NewKeyValue.Value())
+	// Redis payloads are exact bytes/text. String, hash field, list item, and
+	// set member edits must preserve leading, trailing, and embedded whitespace
+	// verbatim; downstream parsers (ParseHashFieldLine, ParseZSetLine,
+	// ParseStreamFields) already trim where Redis semantics need it
+	// (field name, score, blank-line skip) and forward values intact.
+	value := m.NewKeyValue.Value()
 	m.Loading = true
 	key := m.SelectedKey
 	switch m.KeyFormType {
@@ -1443,38 +1448,38 @@ func (m *Model) submitElementEdit() (tea.Model, tea.Cmd) {
 		if m.EditMode == editElementAdd {
 			return m, nil
 		}
-		return m, patchStringValue(m.Client, key, value)
+		return m, patchStringValueFn(m.Client, key, value)
 	case "hash":
 		if m.EditMode == editElementAdd {
-			return m, addHashField(m.Client, key, value)
+			return m, addHashFieldFn(m.Client, key, value)
 		}
 		// Edit mode: NewKeyValue carries only the new value; the field name
 		// is preserved on EditField, so we send it straight to patchHashField
 		// without re-parsing a "field=value" line.
-		return m, patchHashField(m.Client, key, m.EditField, value)
+		return m, patchHashFieldFn(m.Client, key, m.EditField, value)
 	case "list":
 		if m.EditMode == editElementAdd {
-			return m, appendListItem(m.Client, key, value)
+			return m, appendListItemFn(m.Client, key, value)
 		}
-		return m, patchListItem(m.Client, key, m.DetailCursor, value)
+		return m, patchListItemFn(m.Client, key, m.DetailCursor, value)
 	case "set":
 		if m.EditMode == editElementAdd {
-			return m, addSetMember(m.Client, key, value)
+			return m, addSetMemberFn(m.Client, key, value)
 		}
 		// NewKeyValue holds the new member; EditField holds the old member.
-		return m, replaceSetMember(m.Client, key, m.EditField, value)
+		return m, replaceSetMemberFn(m.Client, key, m.EditField, value)
 	case "zset":
 		if m.EditMode == editElementAdd {
-			return m, addZSetMember(m.Client, key, value)
+			return m, addZSetMemberFn(m.Client, key, value)
 		}
 		// NewKeyValue holds "score member" (or pasted "score\tmember");
 		// EditField holds the old member. ParseZSetLine accepts either form.
-		return m, replaceZSetMember(m.Client, key, m.EditField, value)
+		return m, replaceZSetMemberFn(m.Client, key, m.EditField, value)
 	case "stream":
 		if m.EditMode == editElementAdd {
-			return m, addStreamEntry(m.Client, key, value)
+			return m, addStreamEntryFn(m.Client, key, value)
 		}
-		return m, replaceStreamEntry(m.Client, key, m.EditField, value)
+		return m, replaceStreamEntryFn(m.Client, key, m.EditField, value)
 	default:
 		m.Loading = false
 		return m, nil

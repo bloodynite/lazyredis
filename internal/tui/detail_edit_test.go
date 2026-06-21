@@ -4,6 +4,7 @@ import (
 	"strings"
 	"testing"
 
+	tea "github.com/charmbracelet/bubbletea"
 	"github.com/redis/go-redis/v9"
 
 	"github.com/bloodynite/lazyredis/internal/store"
@@ -280,4 +281,378 @@ func indexOf(items []string, target string) int {
 		}
 	}
 	return -1
+}
+
+// loadElementEdit is a tiny shared builder: it wires a Model up with the given
+// detail and DetailCursor, opens the element edit modal, and returns it ready
+// for the caller to mutate m.NewKeyValue and submit.
+func loadElementEdit(t *testing.T, d *store.KeyDetail, cursor int) *Model {
+	t.Helper()
+	m := New()
+	m.Width = 120
+	m.Height = 24
+	m.Client = &store.Client{}
+	m.SelectedKey = d.Meta.Key
+	m.KeyDetail = d
+	m.DetailCursor = cursor
+	next, _ := m.startDetailEdit()
+	return next.(*Model)
+}
+
+// TestSubmitElementEditStringPreservesExactValue pins the bugfix: submitting a
+// string element edit must forward the textarea's exact bytes (including
+// leading/trailing whitespace and embedded newlines) to the patch command.
+// Trimming here would silently corrupt Redis string payloads that depend on
+// exact byte preservation.
+func TestSubmitElementEditStringPreservesExactValue(t *testing.T) {
+	const payload = "  hello\nworld\n  "
+	m := loadElementEdit(t, &store.KeyDetail{
+		Meta:   store.KeyMeta{Key: "demo:str", Type: "string"},
+		String: "orig",
+	}, 0)
+	m.NewKeyValue.SetValue(payload)
+
+	var (
+		capturedKey   string
+		capturedValue string
+	)
+	orig := patchStringValueFn
+	patchStringValueFn = func(_ *store.Client, key, value string) tea.Cmd {
+		capturedKey, capturedValue = key, value
+		return func() tea.Msg { return actionDoneMsg{status: "ok"} }
+	}
+	defer func() { patchStringValueFn = orig }()
+
+	next, cmd := m.submitElementEdit()
+	m = next.(*Model)
+
+	if m.ErrMsg != "" {
+		t.Fatalf("ErrMsg = %q, want empty (exact bytes must not be rejected)", m.ErrMsg)
+	}
+	if cmd == nil {
+		t.Fatal("expected a submit command for string edit")
+	}
+	if !m.Loading {
+		t.Fatal("submit should set loading")
+	}
+	if got := m.NewKeyValue.Value(); got != payload {
+		t.Fatalf("textarea mutated by submit: got %q, want %q", got, payload)
+	}
+	if capturedKey != "demo:str" {
+		t.Fatalf("boundary key = %q, want demo:str", capturedKey)
+	}
+	if capturedValue != payload {
+		t.Fatalf("boundary value trimmed by submit: got %q, want %q", capturedValue, payload)
+	}
+}
+
+// TestSubmitElementEditHashPreservesExactValue mirrors the string test for
+// the hash field edit flow: the textarea holds only the field value (the field
+// name lives on EditField), so its exact bytes must reach patchHashField
+// without a TrimSpace round-trip.
+func TestSubmitElementEditHashPreservesExactValue(t *testing.T) {
+	const payload = "  leading\ntrailing  \n\n"
+	d := &store.KeyDetail{
+		Meta: store.KeyMeta{Key: "demo:hash", Type: "hash"},
+		Hash: map[string]string{"name": "redis"},
+	}
+	m := loadElementEdit(t, d, 0)
+	if m.EditField != "name" {
+		t.Fatalf("EditField = %q, want name", m.EditField)
+	}
+	m.NewKeyValue.SetValue(payload)
+
+	var (
+		capturedKey   string
+		capturedField string
+		capturedValue string
+	)
+	orig := patchHashFieldFn
+	patchHashFieldFn = func(_ *store.Client, key, field, value string) tea.Cmd {
+		capturedKey, capturedField, capturedValue = key, field, value
+		return func() tea.Msg { return actionDoneMsg{status: "ok"} }
+	}
+	defer func() { patchHashFieldFn = orig }()
+
+	next, cmd := m.submitElementEdit()
+	m = next.(*Model)
+
+	if m.ErrMsg != "" {
+		t.Fatalf("ErrMsg = %q, want empty (exact bytes must not be rejected)", m.ErrMsg)
+	}
+	if cmd == nil {
+		t.Fatal("expected a submit command for hash field edit")
+	}
+	if !m.Loading {
+		t.Fatal("submit should set loading")
+	}
+	if got := m.NewKeyValue.Value(); got != payload {
+		t.Fatalf("textarea mutated by submit: got %q, want %q", got, payload)
+	}
+	if m.EditField != "name" {
+		t.Fatalf("EditField = %q, want name preserved", m.EditField)
+	}
+	if capturedKey != "demo:hash" || capturedField != "name" {
+		t.Fatalf("boundary args = (%q, %q, %q), want (demo:hash, name, <payload>)",
+			capturedKey, capturedField, capturedValue)
+	}
+	if capturedValue != payload {
+		t.Fatalf("boundary value trimmed by submit: got %q, want %q", capturedValue, payload)
+	}
+}
+
+// TestSubmitElementEditListPreservesExactValue ensures list item edits also
+// keep exact bytes. Whitespace-only or whitespace-padded list items are valid
+// Redis values; trimming would silently collapse distinct entries.
+func TestSubmitElementEditListPreservesExactValue(t *testing.T) {
+	// The textarea widget expands tabs to 4 spaces; use only newlines and
+	// spaces here so we assert on bytes the widget passes through verbatim.
+	const payload = " first\n   spaced\n  with trailing  \n  "
+	d := &store.KeyDetail{
+		Meta: store.KeyMeta{Key: "demo:list", Type: "list"},
+		List: []string{"alpha"},
+	}
+	m := loadElementEdit(t, d, 0)
+	m.NewKeyValue.SetValue(payload)
+
+	var (
+		capturedKey   string
+		capturedIndex int
+		capturedValue string
+	)
+	orig := patchListItemFn
+	patchListItemFn = func(_ *store.Client, key string, index int, value string) tea.Cmd {
+		capturedKey, capturedIndex, capturedValue = key, index, value
+		return func() tea.Msg { return actionDoneMsg{status: "ok"} }
+	}
+	defer func() { patchListItemFn = orig }()
+
+	next, cmd := m.submitElementEdit()
+	m = next.(*Model)
+
+	if m.ErrMsg != "" {
+		t.Fatalf("ErrMsg = %q, want empty", m.ErrMsg)
+	}
+	if cmd == nil {
+		t.Fatal("expected a submit command for list item edit")
+	}
+	if got := m.NewKeyValue.Value(); got != payload {
+		t.Fatalf("textarea mutated by submit: got %q, want %q", got, payload)
+	}
+	if capturedKey != "demo:list" || capturedIndex != 0 {
+		t.Fatalf("boundary args = (%q, %d, %q), want (demo:list, 0, <payload>)",
+			capturedKey, capturedIndex, capturedValue)
+	}
+	if capturedValue != payload {
+		t.Fatalf("boundary value trimmed by submit: got %q, want %q", capturedValue, payload)
+	}
+}
+
+// TestSubmitElementEditSetPreservesExactValue guards set member edits. Set
+// members in Redis are exact strings; "  admin  " and "admin" are distinct
+// members, so trimming would corrupt membership semantics.
+func TestSubmitElementEditSetPreservesExactValue(t *testing.T) {
+	const payload = "  spaced member  \n"
+	d := &store.KeyDetail{
+		Meta: store.KeyMeta{Key: "demo:set", Type: "set"},
+		Set:  []string{"alpha"},
+	}
+	m := loadElementEdit(t, d, 0)
+	m.NewKeyValue.SetValue(payload)
+
+	var (
+		capturedKey      string
+		capturedOld      string
+		capturedNew      string
+	)
+	orig := replaceSetMemberFn
+	replaceSetMemberFn = func(_ *store.Client, key, oldMember, newMember string) tea.Cmd {
+		capturedKey, capturedOld, capturedNew = key, oldMember, newMember
+		return func() tea.Msg { return actionDoneMsg{status: "ok"} }
+	}
+	defer func() { replaceSetMemberFn = orig }()
+
+	next, cmd := m.submitElementEdit()
+	m = next.(*Model)
+
+	if m.ErrMsg != "" {
+		t.Fatalf("ErrMsg = %q, want empty", m.ErrMsg)
+	}
+	if cmd == nil {
+		t.Fatal("expected a submit command for set member edit")
+	}
+	if got := m.NewKeyValue.Value(); got != payload {
+		t.Fatalf("textarea mutated by submit: got %q, want %q", got, payload)
+	}
+	if m.EditField != "alpha" {
+		t.Fatalf("EditField = %q, want alpha (old member) preserved", m.EditField)
+	}
+	if capturedKey != "demo:set" || capturedOld != "alpha" {
+		t.Fatalf("boundary args = (%q, %q, %q), want (demo:set, alpha, <payload>)",
+			capturedKey, capturedOld, capturedNew)
+	}
+	if capturedNew != payload {
+		t.Fatalf("boundary new member trimmed by submit: got %q, want %q", capturedNew, payload)
+	}
+}
+
+// TestSubmitElementEditZSetPreservesMemberWhitespace pins zset behavior: the
+// parser trims the score but the member goes to Redis verbatim. Leading or
+// trailing whitespace in the member is meaningful (distinct member identity),
+// so the submit must not pre-trim the textarea.
+//
+// Note: ParseZSetLine itself does strings.TrimSpace on the whole line before
+// splitting, so trailing newlines on the textarea payload are dropped at the
+// parser layer. The contract enforced here is narrower: the value forwarded
+// FROM submitElementEdit TO replaceZSetMember must be the textarea's exact
+// bytes (no extra TrimSpace in submitElementEdit).
+func TestSubmitElementEditZSetPreservesMemberWhitespace(t *testing.T) {
+	const payload = "3.14   spaced member   "
+	d := &store.KeyDetail{
+		Meta: store.KeyMeta{Key: "demo:zset", Type: "zset"},
+		ZSet: []redis.Z{{Score: 1, Member: "old"}},
+	}
+	m := loadElementEdit(t, d, 0)
+	m.NewKeyValue.SetValue(payload)
+
+	var (
+		capturedKey     string
+		capturedOld     string
+		capturedLine    string
+	)
+	orig := replaceZSetMemberFn
+	replaceZSetMemberFn = func(_ *store.Client, key, oldMember, line string) tea.Cmd {
+		capturedKey, capturedOld, capturedLine = key, oldMember, line
+		return func() tea.Msg { return actionDoneMsg{status: "ok"} }
+	}
+	defer func() { replaceZSetMemberFn = orig }()
+
+	next, cmd := m.submitElementEdit()
+	m = next.(*Model)
+
+	if m.ErrMsg != "" {
+		t.Fatalf("ErrMsg = %q, want empty", m.ErrMsg)
+	}
+	if cmd == nil {
+		t.Fatal("expected a submit command for zset member edit")
+	}
+	if got := m.NewKeyValue.Value(); got != payload {
+		t.Fatalf("textarea mutated by submit: got %q, want %q", got, payload)
+	}
+	if capturedKey != "demo:zset" || capturedOld != "old" {
+		t.Fatalf("boundary args = (%q, %q, %q), want (demo:zset, old, <payload>)",
+			capturedKey, capturedOld, capturedLine)
+	}
+	if capturedLine != payload {
+		t.Fatalf("boundary line trimmed by submit: got %q, want %q", capturedLine, payload)
+	}
+}
+
+// TestSubmitElementEditStreamPreservesFieldValues ensures stream field edits
+// keep exact field values. ParseStreamFields splits on \n and skips blank
+// lines, but each surviving line's value half goes to Redis verbatim.
+//
+// We assert on the raw payload forwarded to replaceStreamEntry: submitElementEdit
+// itself must not pre-trim it. Per-line value trimming is a parser concern
+// covered by store tests.
+func TestSubmitElementEditStreamPreservesFieldValues(t *testing.T) {
+	const payload = "a=  spaced value  \nb=keep\n"
+	d := &store.KeyDetail{
+		Meta: store.KeyMeta{Key: "demo:stream", Type: "stream"},
+		Stream: []store.StreamEntry{{
+			ID:     "1-0",
+			Fields: map[string]string{"a": "1", "b": "two"},
+		}},
+	}
+	m := loadElementEdit(t, d, 0)
+	m.NewKeyValue.SetValue(payload)
+
+	var (
+		capturedKey string
+		capturedID  string
+		capturedRaw string
+	)
+	orig := replaceStreamEntryFn
+	replaceStreamEntryFn = func(_ *store.Client, key, id, raw string) tea.Cmd {
+		capturedKey, capturedID, capturedRaw = key, id, raw
+		return func() tea.Msg { return actionDoneMsg{status: "ok"} }
+	}
+	defer func() { replaceStreamEntryFn = orig }()
+
+	next, cmd := m.submitElementEdit()
+	m = next.(*Model)
+
+	if m.ErrMsg != "" {
+		t.Fatalf("ErrMsg = %q, want empty", m.ErrMsg)
+	}
+	if cmd == nil {
+		t.Fatal("expected a submit command for stream entry edit")
+	}
+	if got := m.NewKeyValue.Value(); got != payload {
+		t.Fatalf("textarea mutated by submit: got %q, want %q", got, payload)
+	}
+	if m.EditField != "1-0" {
+		t.Fatalf("EditField = %q, want 1-0 (entry id) preserved", m.EditField)
+	}
+	if capturedKey != "demo:stream" || capturedID != "1-0" {
+		t.Fatalf("boundary args = (%q, %q, %q), want (demo:stream, 1-0, <payload>)",
+			capturedKey, capturedID, capturedRaw)
+	}
+	if capturedRaw != payload {
+		t.Fatalf("boundary raw trimmed by submit: got %q, want %q", capturedRaw, payload)
+	}
+}
+
+// TestSubmitElementEditAddHashPreservesValueWhitespace keeps the add/hash
+// "field=value" flow honest: the parser trims the field name, but the value
+// half must be forwarded with its leading/trailing whitespace intact.
+//
+// ParseHashFieldLine applies TrimSpace to the field side and returns the
+// value side verbatim. The boundary contract enforced here is that the whole
+// "field=value" line reaches addHashField exactly as the user typed it.
+func TestSubmitElementEditAddHashPreservesValueWhitespace(t *testing.T) {
+	const payload = "field=  spaced value\n"
+	d := &store.KeyDetail{
+		Meta: store.KeyMeta{Key: "demo:hash", Type: "hash"},
+		Hash: map[string]string{"k": "v"},
+	}
+	m := New()
+	m.Width = 120
+	m.Height = 24
+	m.Client = &store.Client{}
+	m.SelectedKey = d.Meta.Key
+	m.KeyDetail = d
+	next, _ := m.startDetailAdd()
+	m = next.(*Model)
+	m.NewKeyValue.SetValue(payload)
+
+	var (
+		capturedKey string
+		capturedLine string
+	)
+	orig := addHashFieldFn
+	addHashFieldFn = func(_ *store.Client, key, line string) tea.Cmd {
+		capturedKey, capturedLine = key, line
+		return func() tea.Msg { return actionDoneMsg{status: "ok"} }
+	}
+	defer func() { addHashFieldFn = orig }()
+
+	next, cmd := m.submitElementEdit()
+	m = next.(*Model)
+
+	if m.ErrMsg != "" {
+		t.Fatalf("ErrMsg = %q, want empty (value whitespace should not be rejected)", m.ErrMsg)
+	}
+	if cmd == nil {
+		t.Fatal("expected a submit command for hash field add")
+	}
+	if got := m.NewKeyValue.Value(); got != payload {
+		t.Fatalf("textarea mutated by submit: got %q, want %q", got, payload)
+	}
+	if capturedKey != "demo:hash" {
+		t.Fatalf("boundary key = %q, want demo:hash", capturedKey)
+	}
+	if capturedLine != payload {
+		t.Fatalf("boundary line trimmed by submit: got %q, want %q", capturedLine, payload)
+	}
 }
