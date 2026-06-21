@@ -39,7 +39,7 @@ Edit key modal with TTL, type, and value fields:
 From a release tag:
 
 ```bash
-go install github.com/bloodynite/lazyredis/cmd/lazyredis@v0.0.7
+go install github.com/bloodynite/lazyredis/cmd/lazyredis@v0.0.8
 ```
 
 Then run:
@@ -212,61 +212,9 @@ Set `settings.shortcut_modifier` to `ctrl` or `alt`. Restart lazyredis after edi
 - Unknown settings are ignored.
 - Modal hints, the keybar, and the in-app help (`?`) all read these binds at runtime.
 
-#### Action ID reference
+### Shortcuts
 
-| Action ID | Default | Description |
-|-----------|---------|-------------|
-| **Global** | | |
-| `app.help` | `?` | Toggle keyboard help overlay |
-| `app.force_quit` | `ctrl+c` | Force quit the application |
-| `help.close` | `?`, `esc` | Close the help overlay |
-| **Profiles screen** | | |
-| `profiles.up` | `k`, `up` | Move selection up |
-| `profiles.down` | `j`, `down` | Move selection down |
-| `profiles.connect` | `enter` | Connect to selected profile |
-| `profiles.new` | `n` | New profile (opens profile form) |
-| `profiles.edit` | `e` | Edit selected profile |
-| `profiles.delete` | `d` | Delete selected profile (confirmation) |
-| `profiles.quit` | `q` | Quit the application |
-| **Profile form** | | |
-| `form.tab` | `tab` | Next field |
-| `form.shift_tab` | `shift+tab` | Previous field |
-| `save` | `{modifier}+s` | Save current form/modal |
-| `form.esc` | `esc` | Cancel and return to Profiles |
-| **Browser** | | |
-| `browser.tab` | `tab` | Switch Keys / Detail panel focus |
-| `browser.up` | `k`, `up` | Move up in the focused panel |
-| `browser.down` | `j`, `down` | Move down in the focused panel |
-| `browser.filter` | `/` | Open key filter input |
-| `browser.filter_apply` | `enter` | Apply filter (while filter input is focused) |
-| `browser.filter_cancel` | `esc` | Close filter without applying |
-| `browser.new_key` | `n` | New key modal |
-| `browser.refresh` | `r` | Refresh keys and server info |
-| `browser.auto_refresh` | `a` | Edit auto-refresh interval |
-| `browser.flush` | `ctrl+f` | Flush current database (confirmation) |
-| `browser.more_keys` | `g` | Load next page of keys (when scan cursor remains) |
-| `browser.ttl` | `t` | Edit TTL for selected key |
-| `browser.delete` | `d` | Delete selected key (confirmation) |
-| `browser.edit` | `e` | Edit selected key (Keys panel) |
-| `browser.detail_add` | `i` | Add item (Detail panel, composite types) |
-| `browser.detail_edit` | `e` | Edit item or string value (Detail panel) |
-| `browser.detail_delete` | `d` | Delete item (Detail panel) |
-| `browser.copy` | `c` | Copy value to system clipboard |
-| `browser.disconnect` | `q` | Disconnect and return to Profiles |
-| **Modals (new/edit key, TTL, auto-refresh, item edit)** | | |
-| `edit.tab` | `tab` | Next field (key form modal) |
-| `edit.shift_tab` | `shift+tab` | Previous field (key form modal) |
-| `save` | `{modifier}+s` | Save (TTL, auto-refresh, key form, item edit) |
-| `edit.esc` | `esc` | Cancel modal |
-| **Confirm dialog** | | |
-| `confirm.yes` | `y` | Confirm destructive action |
-| `confirm.no` | `n`, `esc` | Cancel |
-
-Source of truth in code: [internal/tui/keys.go](internal/tui/keys.go).
-
-**Notes**
-
-- In the key form modal, `Tab` advances fields and save uses `{modifier}+s`.
+- Save uses `{modifier}+s`.
 - `browser.up` / `browser.down` are also used to change key type when the Type field is focused in the new-key modal.
 - `browser.up`, `browser.down`, `browser.tab`, and shared letters (`n`, `e`, `d`, `q`) are reused across screens where noted above.
 
