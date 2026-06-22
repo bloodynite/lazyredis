@@ -1224,10 +1224,8 @@ func detailItemCount(d *store.KeyDetail) int {
 	}
 }
 
-// detailTotalOrZero returns the length of the composite key in detail
-// when it is fully loaded, or 0 when the type is non-composite / the
-// length is unknown. Used by the summary handler to record how many
-// entries of DetailTotal are immediately visible after a full fetch.
+// detailTotalOrZero returns the composite length when it is fully
+// loaded, or 0 for non-composite / unknown types.
 func detailTotalOrZero(total int64, keyType string) int64 {
 	if keyType == "string" || keyType == "" {
 		return 0
@@ -1238,9 +1236,6 @@ func detailTotalOrZero(total int64, keyType string) int64 {
 	return total
 }
 
-// compositeLoadedCount returns the number of composite entries
-// currently loaded into d. For paged fetches this is the size of the
-// loaded window, not the key's total length.
 func compositeLoadedCount(d *store.KeyDetail) int {
 	if d == nil {
 		return 0
@@ -1248,12 +1243,6 @@ func compositeLoadedCount(d *store.KeyDetail) int {
 	return detailItemCount(d)
 }
 
-// mergeChunkIntoDetail appends the entries from src into dst, starting
-// at offset. The two details must be for the same key+type; this is
-// guaranteed by the caller (detailGen + key match in the message
-// handler). For ordered types (list, zset, stream) src is appended in
-// order. For unordered types (hash, set) the chunk is merged and the
-// caller may re-sort as needed at render time.
 func mergeChunkIntoDetail(dst, src *store.KeyDetail, offset int) {
 	if dst == nil || src == nil {
 		return
@@ -1277,11 +1266,6 @@ func mergeChunkIntoDetail(dst, src *store.KeyDetail, offset int) {
 	}
 }
 
-// handleDetailError decides whether a keySummaryMsg or keyDetailMsg
-// error is recoverable (WRONGTYPE from a type change between summary
-// and detail, or a transient connection blip) and re-fires the
-// summary with a fresh detailGen. After at most one retry the error
-// is surfaced in ErrMsg so the user can see what happened.
 func (m *Model) handleDetailError(errMsg string) tea.Cmd {
 	if m.Client == nil || m.SelectedKey == "" {
 		m.ErrMsg = errMsg
@@ -1302,20 +1286,14 @@ func (m *Model) handleDetailError(errMsg string) tea.Cmd {
 	return loadKeySummaryFn(m.Client, m.SelectedKey, m.detailGen)
 }
 
-// looksLikeRetriableDetailError reports whether the error message
-// describes a race that a fresh TYPE call can resolve. WRONGTYPE
-// happens when the key changed type between the summary pipeline and
-// the detail fetch; "LOADING" happens when Redis is loading the
-// dataset (e.g. right after a flush with appendonly); "LOADING
-// server is busy" and similar transient I/O errors also fit.
+// WRONGTYPE means a key changed type between the summary TYPE call and
+// the detail fetch; LOADING means Redis is loading the dataset. Both
+// resolve with a fresh summary on the same key.
 func looksLikeRetriableDetailError(msg string) bool {
 	return strings.Contains(msg, "WRONGTYPE") ||
 		strings.Contains(msg, "LOADING")
 }
-// within detailChunkLookahead of the end of the currently loaded
-// window and the key's total is larger than what we have. It is a
-// no-op when the cursor is still inside the loaded range or when a
-// chunk is already in flight. Returns the cmd to run, or nil.
+
 func (m *Model) maybeLoadMoreDetail() tea.Cmd {
 	if m.Client == nil || m.KeyDetail == nil {
 		return nil
@@ -1354,16 +1332,12 @@ func stringDetailScrollLimit(value string, panelW, listH int) int {
 
 const (
 	copiedToClipboardStatus = "copied to clipboard"
-	statusMessageDuration   = 3 * time.Second
-	detailDebounceDuration  = 80 * time.Millisecond
-	// detailChunkSize is the number of entries (hash fields, list items,
-	// set members, zset members, stream entries) loaded per round-trip.
-	// One chunk is enough for the visible viewport of every supported
-	// terminal size; further chunks are auto-loaded as the user scrolls.
+	statusMessageDuration  = 3 * time.Second
+	detailDebounceDuration = 80 * time.Millisecond
+	// detailChunkSize is entries per composite fetch.
 	detailChunkSize = 200
-	// detailChunkLookahead triggers a next-chunk load when the cursor is
-	// within this many entries of the end of the currently loaded
-	// window. Prevents a visible gap when the user holds j or G.
+	// detailChunkLookahead triggers the next chunk when the cursor
+	// gets this close to the end of the loaded window.
 	detailChunkLookahead = 50
 )
 
@@ -1777,6 +1751,7 @@ func (m *Model) refreshDataCmd() []tea.Cmd {
 	m.scanGen++
 	gen := m.scanGen
 	m.detailGen++
+	m.detailRetryCount = 0
 	detailGen := m.detailGen
 	cmds := []tea.Cmd{
 		loadInfo(m.Client),
