@@ -390,21 +390,29 @@ func (c *Client) loadSetWindow(ctx context.Context, key string, offset, limit in
 }
 
 // loadStreamWindow returns stream entries for the requested window,
-// ordered by ID ascending. XRangeN with COUNT paginates directly.
+// ordered by ID ascending. Full mode uses XRange without COUNT (an explicit
+// COUNT 0 is rejected by Redis with "redis: nil" — see fix note in commit).
+// Paged mode uses XRangeN with COUNT=limit and skips offset items.
 func (c *Client) loadStreamWindow(ctx context.Context, key string, offset, limit int, full bool) []StreamEntry {
-	count := int64(0)
-	if !full {
-		count = int64(limit)
-	}
-	msgs, err := c.rdb.XRangeN(ctx, key, "-", "+", count).Result()
-	if err != nil {
-		return nil
-	}
-	if !full && offset > 0 {
-		if offset >= len(msgs) {
-			return []StreamEntry{}
+	var msgs []redis.XMessage
+	if full {
+		var err error
+		msgs, err = c.rdb.XRange(ctx, key, "-", "+").Result()
+		if err != nil {
+			return nil
 		}
-		msgs = msgs[offset:]
+	} else {
+		var err error
+		msgs, err = c.rdb.XRangeN(ctx, key, "-", "+", int64(limit)).Result()
+		if err != nil {
+			return nil
+		}
+		if offset > 0 {
+			if offset >= len(msgs) {
+				return []StreamEntry{}
+			}
+			msgs = msgs[offset:]
+		}
 	}
 	out := make([]StreamEntry, 0, len(msgs))
 	for _, msg := range msgs {
