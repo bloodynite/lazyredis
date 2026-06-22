@@ -900,14 +900,15 @@ func highlightSubstring(s, query string) string {
 	if query == "" {
 		return s
 	}
-	if !strings.Contains(s, query) {
+	if !strings.Contains(strings.ToLower(s), strings.ToLower(query)) {
 		return s
 	}
 	return highlightAllWithStyle(s, query, searchMatchStyle)
 }
 
 func highlightChunkActive(chunk, query string, activeOffset int) string {
-	if query == "" || !strings.Contains(chunk, query) {
+	q := strings.ToLower(query)
+	if query == "" || !strings.Contains(strings.ToLower(chunk), q) {
 		return chunk
 	}
 	if activeOffset < 0 {
@@ -915,8 +916,9 @@ func highlightChunkActive(chunk, query string, activeOffset int) string {
 	}
 	var out strings.Builder
 	cursor := 0
+	lower := strings.ToLower(chunk)
 	for {
-		idx := strings.Index(chunk[cursor:], query)
+		idx := strings.Index(lower[cursor:], q)
 		if idx < 0 {
 			out.WriteString(chunk[cursor:])
 			break
@@ -934,10 +936,12 @@ func highlightChunkActive(chunk, query string, activeOffset int) string {
 }
 
 func highlightAllWithStyle(s, query string, style lipgloss.Style) string {
+	q := strings.ToLower(query)
+	lower := strings.ToLower(s)
 	var out strings.Builder
 	cursor := 0
 	for {
-		idx := strings.Index(s[cursor:], query)
+		idx := strings.Index(lower[cursor:], q)
 		if idx < 0 {
 			out.WriteString(s[cursor:])
 			break

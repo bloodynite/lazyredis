@@ -471,43 +471,44 @@ func computeDetailSearchMatches(d *store.KeyDetail, query string) (matches []int
 	if query == "" {
 		return nil, 0
 	}
+	q := strings.ToLower(query)
 	switch d.Meta.Type {
 	case "string":
-		haystack := sanitizeDetailRow(d.String)
-		count = strings.Count(haystack, query)
+		haystack := strings.ToLower(sanitizeDetailRow(d.String))
+		count = strings.Count(haystack, q)
 		if count == 0 {
 			return nil, 0
 		}
 		matches = make([]int, 0, count)
 		cursor := 0
 		for {
-			idx := strings.Index(haystack[cursor:], query)
+			idx := strings.Index(haystack[cursor:], q)
 			if idx < 0 {
 				break
 			}
 			start := cursor + idx
 			matches = append(matches, start)
-			cursor = start + len(query)
+			cursor = start + len(q)
 		}
 		return matches, count
 	case "hash":
 		fields := hashFields(d.Hash)
 		for i, f := range fields {
-			if strings.Contains(f, query) || strings.Contains(d.Hash[f], query) {
+			if strings.Contains(strings.ToLower(f), q) || strings.Contains(strings.ToLower(d.Hash[f]), q) {
 				count++
 				matches = append(matches, i)
 			}
 		}
 	case "list":
 		for i, v := range d.List {
-			if strings.Contains(v, query) {
+			if strings.Contains(strings.ToLower(v), q) {
 				count++
 				matches = append(matches, i)
 			}
 		}
 	case "set":
 		for i, v := range d.Set {
-			if strings.Contains(v, query) {
+			if strings.Contains(strings.ToLower(v), q) {
 				count++
 				matches = append(matches, i)
 			}
@@ -515,15 +516,15 @@ func computeDetailSearchMatches(d *store.KeyDetail, query string) (matches []int
 	case "zset":
 		for i, z := range d.ZSet {
 			member, _ := z.Member.(string)
-			if strings.Contains(member, query) ||
-				strings.Contains(strconv.FormatFloat(z.Score, 'f', -1, 64), query) {
+			if strings.Contains(strings.ToLower(member), q) ||
+				strings.Contains(strings.ToLower(strconv.FormatFloat(z.Score, 'f', -1, 64)), q) {
 				count++
 				matches = append(matches, i)
 			}
 		}
 	case "stream":
 		for i, e := range d.Stream {
-			if strings.Contains(e.ID, query) || strings.Contains(formatStreamEntry(e), query) {
+			if strings.Contains(strings.ToLower(e.ID), q) || strings.Contains(strings.ToLower(formatStreamEntry(e)), q) {
 				count++
 				matches = append(matches, i)
 			}
