@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -101,10 +102,15 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.PanelFocus = panelKeys
 		m.PrevScreen = ScreenProfiles
 		m.scanGen = 1
+		m.refreshGen++
+		m.detailGen = 0
 		statusCmd := m.statusClearCmd(fmt.Sprintf("connected to %s", msg.client.Profile().Name))
 		return m, tea.Batch(loadInfo(m.Client), scanKeys(m.Client, 0, m.ScanPattern, false, m.scanGen), m.Spinner.Tick, m.scheduleAutoRefreshCmd(), statusCmd)
 
 	case autoRefreshMsg:
+		if msg.gen != 0 && msg.gen != m.refreshGen {
+			return m, nil
+		}
 		cmds := []tea.Cmd{m.scheduleAutoRefreshCmd()}
 		if m.canAutoRefresh() {
 			m.Loading = true
@@ -137,27 +143,39 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.Keys = msg.keys
 		cursor := 0
+		foundSelected := false
 		if m.SelectedKey != "" {
 			for i, k := range m.Keys {
 				if k == m.SelectedKey {
 					cursor = i
+					foundSelected = true
 					break
 				}
 			}
 		}
+		if !foundSelected {
+			if m.KeyCursor >= len(m.Keys) {
+				cursor = max(0, len(m.Keys)-1)
+			} else {
+				cursor = m.KeyCursor
+			}
+		}
 		m.KeyCursor = cursor
-		m.KeyScroll = 0
 		m.adjustKeyScroll()
 		if len(m.Keys) > 0 {
 			m.SelectedKey = m.Keys[m.KeyCursor]
+			m.detailGen++
 			m.Loading = true
-			return m, loadKeyDetail(m.Client, m.SelectedKey)
+			return m, loadKeyDetail(m.Client, m.SelectedKey, m.detailGen)
 		}
 		m.SelectedKey = ""
 		m.KeyDetail = nil
 		return m, nil
 
 	case keyDetailMsg:
+		if msg.gen != m.detailGen || msg.key != m.SelectedKey {
+			return m, nil
+		}
 		m.Loading = false
 		if msg.err != nil {
 			m.ErrMsg = msg.err.Error()
@@ -179,6 +197,16 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.applyDetailSearch(prevCursor, sameKey)
 		}
 		return m, nil
+
+	case detailDebounceMsg:
+		if msg.gen != m.detailGen || msg.key != m.SelectedKey {
+			return m, nil
+		}
+		if m.Client == nil {
+			return m, nil
+		}
+		m.Loading = true
+		return m, loadKeyDetail(m.Client, msg.key, msg.gen)
 
 	case actionDoneMsg:
 		m.Loading = false
@@ -217,7 +245,8 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, tea.Batch(loadInfo(m.Client), m.rescanKeysCmd(), statusCmd)
 			}
 			if msg.reload && m.Client != nil && m.SelectedKey != "" {
-				return m, tea.Batch(loadKeyDetail(m.Client, m.SelectedKey), statusCmd)
+				m.detailGen++
+				return m, tea.Batch(loadKeyDetail(m.Client, m.SelectedKey, m.detailGen), statusCmd)
 			}
 			return m, statusCmd
 		}
@@ -227,7 +256,8 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		if msg.reload && m.Screen == ScreenBrowser && m.Client != nil && m.SelectedKey != "" {
 			m.Loading = true
-			return m, tea.Batch(loadKeyDetail(m.Client, m.SelectedKey), statusCmd)
+			m.detailGen++
+			return m, tea.Batch(loadKeyDetail(m.Client, m.SelectedKey, m.detailGen), statusCmd)
 		}
 		return m, statusCmd
 	}
@@ -677,7 +707,7 @@ func (m *Model) handleBrowserKeys(key string, msg tea.KeyMsg) (tea.Model, tea.Cm
 		}
 	case m.matchAction(actionBrowserRefresh, key):
 		m.Loading = true
-		return m, tea.Batch(append(m.refreshDataCmd(), m.scheduleAutoRefreshCmd())...)
+		return m, tea.Batch(m.refreshDataCmd()...)
 	case m.matchAction(actionBrowserAutoRefresh, key):
 		sec := config.DefaultRefreshIntervalSec
 		if m.Config != nil {
@@ -741,8 +771,9 @@ func (m *Model) moveKeyCursor(delta int) (tea.Model, tea.Cmd) {
 	m.adjustKeyScroll()
 	m.PanelFocus = panelKeys
 	m.SelectedKey = m.Keys[m.KeyCursor]
+	m.detailGen++
 	m.Loading = true
-	return m, loadKeyDetail(m.Client, m.SelectedKey)
+	return m, scheduleDetailDebounce(m.SelectedKey, m.detailGen)
 }
 
 func (m *Model) handleConfirmKeys(key string) (tea.Model, tea.Cmd) {
@@ -1167,6 +1198,7 @@ func stringDetailScrollLimit(value string, panelW, listH int) int {
 const (
 	copiedToClipboardStatus = "copied to clipboard"
 	statusMessageDuration   = 3 * time.Second
+	detailDebounceDuration  = 80 * time.Millisecond
 )
 
 func (m *Model) statusClearCmd(msg string) tea.Cmd {
@@ -1508,13 +1540,7 @@ func hashFields(h map[string]string) []string {
 	for k := range h {
 		out = append(out, k)
 	}
-	for i := 0; i < len(out); i++ {
-		for j := i + 1; j < len(out); j++ {
-			if out[j] < out[i] {
-				out[i], out[j] = out[j], out[i]
-			}
-		}
-	}
+	sort.Strings(out)
 	return out
 }
 
@@ -1569,7 +1595,8 @@ func (m *Model) scheduleAutoRefreshCmd() tea.Cmd {
 	if sec <= 0 {
 		return nil
 	}
-	return scheduleAutoRefresh(time.Duration(sec) * time.Second)
+	m.refreshGen++
+	return scheduleAutoRefresh(time.Duration(sec)*time.Second, m.refreshGen)
 }
 
 func (m *Model) rescanKeysCmd() tea.Cmd {
@@ -1583,12 +1610,14 @@ func (m *Model) rescanKeysCmd() tea.Cmd {
 func (m *Model) refreshDataCmd() []tea.Cmd {
 	m.scanGen++
 	gen := m.scanGen
+	m.detailGen++
+	detailGen := m.detailGen
 	cmds := []tea.Cmd{
 		loadInfo(m.Client),
 		scanKeys(m.Client, 0, m.ScanPattern, false, gen),
 	}
 	if m.SelectedKey != "" {
-		cmds = append(cmds, loadKeyDetail(m.Client, m.SelectedKey))
+		cmds = append(cmds, loadKeyDetail(m.Client, m.SelectedKey, detailGen))
 	}
 	return cmds
 }

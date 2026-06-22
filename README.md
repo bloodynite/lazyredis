@@ -355,6 +355,7 @@ When connected, the browser refreshes keys and server info automatically every `
 - Press `a` to change the interval (saved to config)
 - Set `0` to disable
 - Press `r` for immediate manual refresh
+- Auto-refresh and manual refresh keep the current key selection and scroll position when the selected key is still in the list; only the in-place data refreshes
 
 ## Development
 

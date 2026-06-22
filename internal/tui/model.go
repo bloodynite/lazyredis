@@ -86,6 +86,9 @@ type Model struct {
 	KeyDetail   *store.KeyDetail
 	DetailCursor int
 	DetailScroll int
+	detailGen    uint64
+
+	refreshGen uint64
 
 	EditMode     editMode
 	EditInput    textinput.Model
@@ -168,6 +171,7 @@ func New() *Model {
 		NewKeyName:        newKeyName,
 		NewKeyValue:       newKeyValue,
 		ScanPattern:       "*",
+		refreshGen:        1,
 	}
 }
 

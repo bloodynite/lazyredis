@@ -321,8 +321,12 @@ func TestDetailSearchSurvivesKeyChange(t *testing.T) {
 	m.DetailSearchFocus = true
 	m.DetailSearchInput.SetValue("old-query")
 
+	m.SelectedKey = "new"
+	m.detailGen++
 	next, _ := m.Update(keyDetailMsg{
 		detail: &store.KeyDetail{Meta: store.KeyMeta{Type: "string", Key: "new"}, String: "new"},
+		key:    "new",
+		gen:    m.detailGen,
 	})
 	m = next.(*Model)
 	if m.DetailSearchFocus {
@@ -681,11 +685,15 @@ func TestDetailSearchKeyChangeResetsMatches(t *testing.T) {
 		t.Fatalf("setup: cursor = %d, want 1", m.DetailSearchCursor)
 	}
 
+	m.SelectedKey = "new"
+	m.detailGen++
 	next, _ := m.Update(keyDetailMsg{
 		detail: &store.KeyDetail{
 			Meta:   store.KeyMeta{Type: "string", Key: "new"},
 			String: "foo x foo y foo",
 		},
+		key: "new",
+		gen: m.detailGen,
 	})
 	m = next.(*Model)
 	if m.DetailSearchCursor != 0 {
@@ -722,6 +730,8 @@ func TestDetailSearchRefreshPreservesCursor(t *testing.T) {
 			Meta:   store.KeyMeta{Type: "string", Key: "k"},
 			String: "foo bar foo baz foo qux",
 		},
+		key: "k",
+		gen: m.detailGen,
 	})
 	m = next.(*Model)
 	if m.DetailSearchCursor != 1 {
@@ -764,6 +774,8 @@ func TestDetailSearchRefreshClampsCursorWhenFewerMatches(t *testing.T) {
 			Meta:   store.KeyMeta{Type: "string", Key: "k"},
 			String: "foo x foo y",
 		},
+		key: "k",
+		gen: m.detailGen,
 	})
 	m = next.(*Model)
 	if len(m.DetailSearchMatches) != 2 {
@@ -801,6 +813,8 @@ func TestDetailSearchRefreshClearsCursorWhenNoMatches(t *testing.T) {
 			Meta:   store.KeyMeta{Type: "string", Key: "k"},
 			String: "plain value",
 		},
+		key: "k",
+		gen: m.detailGen,
 	})
 	m = next.(*Model)
 	if len(m.DetailSearchMatches) != 0 {
@@ -852,6 +866,8 @@ func TestDetailSearchRefreshPreservesCursorForHash(t *testing.T) {
 				"delta":  "found",
 			},
 		},
+		key: "k",
+		gen: m.detailGen,
 	})
 	m = next.(*Model)
 	if len(m.DetailSearchMatches) != 3 {
@@ -1022,8 +1038,12 @@ func TestDetailSearchActiveMatchStyleClearedOnKeyChange(t *testing.T) {
 	// Switch to a key with no matches: DetailSearchInput keeps its value, so
 	// the new detail panel would still attempt to render highlights. With no
 	// matches, activeSearchMatchStyle must NOT appear.
+	m.SelectedKey = "new"
+	m.detailGen++
 	next, _ = m.Update(keyDetailMsg{
 		detail: &store.KeyDetail{Meta: store.KeyMeta{Type: "string", Key: "new"}, String: "plain"},
+		key:    "new",
+		gen:    m.detailGen,
 	})
 	m = next.(*Model)
 	if len(m.DetailSearchMatches) != 0 {
