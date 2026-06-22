@@ -5,6 +5,8 @@ import (
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/bubbles/textarea"
+	"github.com/charmbracelet/lipgloss"
 	"github.com/redis/go-redis/v9"
 
 	"github.com/bloodynite/lazyredis/internal/store"
@@ -654,5 +656,160 @@ func TestSubmitElementEditAddHashPreservesValueWhitespace(t *testing.T) {
 	}
 	if capturedLine != payload {
 		t.Fatalf("boundary line trimmed by submit: got %q, want %q", capturedLine, payload)
+	}
+}
+
+func TestSyncNewKeyLayoutBodyOverlayForElementEdit(t *testing.T) {
+	cases := []struct {
+		name       string
+		width      int
+		height     int
+		wantHeight int
+	}{
+		{"standard", 120, 24, 17},
+		{"wide", 200, 40, 33},
+		{"narrow", 40, 12, 5},
+		{"tiny clamped to 2", 30, 8, 2},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			for _, mode := range []editMode{editElement, editElementAdd} {
+				m := New()
+				m.Width = tc.width
+				m.Height = tc.height
+				m.EditMode = mode
+				m.syncNewKeyLayout()
+
+				if got := textareaRenderedWidth(m.NewKeyValue); got != tc.width {
+					t.Errorf("mode=%v rendered width = %d, want %d", mode, got, tc.width)
+				}
+				if got := m.NewKeyValue.Height(); got != tc.wantHeight {
+					t.Errorf("mode=%v textarea height = %d, want %d", mode, got, tc.wantHeight)
+				}
+				wantTitleLines := 1
+				wantHintLines := 1
+				totalContent := wantTitleLines + tc.wantHeight + wantHintLines
+				if totalContent > m.panelAreaLines() {
+					t.Errorf("mode=%v title(%d)+textarea(%d)+hint(%d)=%d overflows body overlay height %d",
+						mode, wantTitleLines, tc.wantHeight, wantHintLines, totalContent, m.panelAreaLines())
+				}
+			}
+		})
+	}
+}
+
+func TestSyncNewKeyLayoutModalKeepsModalDimensions(t *testing.T) {
+	for _, mode := range []editMode{editNewKey, editExistingKey, editTTL} {
+		t.Run(editModeName(mode), func(t *testing.T) {
+			m := New()
+			m.Width = 120
+			m.Height = 24
+			m.EditMode = mode
+			m.syncNewKeyLayout()
+
+			wantInputW := min(62, max(36, 120*2/3-8))
+			if got := m.NewKeyTTL.Width; got != wantInputW {
+				t.Errorf("NewKeyTTL width = %d, want %d", got, wantInputW)
+			}
+			if got := m.NewKeyName.Width; got != wantInputW {
+				t.Errorf("NewKeyName width = %d, want %d", got, wantInputW)
+			}
+			if got := textareaRenderedWidth(m.NewKeyValue); got != wantInputW {
+				t.Errorf("NewKeyValue rendered width = %d, want %d", got, wantInputW)
+			}
+			wantH := m.newKeyValueHeight()
+			if got := m.NewKeyValue.Height(); got != wantH {
+				t.Errorf("NewKeyValue height = %d, want %d", got, wantH)
+			}
+			if m.newKeyValueHeight() > 12 {
+				t.Errorf("modal textarea height %d exceeds 12-row cap", m.newKeyValueHeight())
+			}
+		})
+	}
+}
+
+func textareaRenderedWidth(t textarea.Model) int {
+	view := t.View()
+	for _, l := range strings.Split(view, "\n") {
+		if w := lipgloss.Width(l); w > 0 {
+			return w
+		}
+	}
+	return 0
+}
+
+func editModeName(m editMode) string {
+	switch m {
+	case editElement:
+		return "editElement"
+	case editElementAdd:
+		return "editElementAdd"
+	case editNewKey:
+		return "editNewKey"
+	case editExistingKey:
+		return "editExistingKey"
+	case editTTL:
+		return "editTTL"
+	case editRefreshInterval:
+		return "editRefreshInterval"
+	default:
+		return "editString"
+	}
+}
+
+func TestViewDetailEditTextareaFillsBodyOverlay(t *testing.T) {
+	m := New()
+	m.Width = 120
+	m.Height = 24
+	m.Client = &store.Client{}
+	m.SelectedKey = "demo:key"
+	m.KeyDetail = &store.KeyDetail{
+		Meta:   store.KeyMeta{Key: "demo:key", Type: "string"},
+		String: "hello world",
+	}
+	m.DetailCursor = 0
+	next, _ := m.startDetailEdit()
+	m = next.(*Model)
+
+	if got := textareaRenderedWidth(m.NewKeyValue); got != m.Width {
+		t.Fatalf("textarea rendered width = %d, want full width %d", got, m.Width)
+	}
+	wantH := m.panelAreaLines() - 2
+	if got := m.NewKeyValue.Height(); got != wantH {
+		t.Fatalf("textarea height = %d, want %d (panelAreaLines=%d - title - hint)",
+			got, wantH, m.panelAreaLines())
+	}
+
+	out := m.View()
+	lines := strings.Split(out, "\n")
+	if len(lines) != m.Height {
+		t.Fatalf("view lines = %d, want %d", len(lines), m.Height)
+	}
+	panelStart := gridInfoRows
+	panelEnd := panelStart + m.panelAreaLines()
+	panelLines := lines[panelStart:panelEnd]
+
+	hasTitle := false
+	hasHint := false
+	for _, l := range panelLines {
+		plain := stripANSI(l)
+		if strings.Contains(plain, "Edit item") {
+			hasTitle = true
+		}
+		if strings.Contains(plain, "save") && strings.Contains(plain, "cancel") {
+			hasHint = true
+		}
+	}
+	if !hasTitle {
+		t.Fatalf("detail edit body overlay missing title line; panel=%q", strings.Join(panelLines, "\n"))
+	}
+	if !hasHint {
+		t.Fatalf("detail edit body overlay missing save/cancel hint line; panel=%q", strings.Join(panelLines, "\n"))
+	}
+
+	for i, l := range panelLines {
+		if w := lipgloss.Width(l); w != m.Width {
+			t.Fatalf("panel line %d width = %d, want %d (line=%q)", i, w, m.Width, l)
+		}
 	}
 }

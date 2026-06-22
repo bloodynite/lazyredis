@@ -785,6 +785,23 @@ func (m *Model) syncNewKeyLayout() {
 	if m.Width == 0 {
 		return
 	}
+	if m.elementEditUsesTextarea() {
+		m.syncNewKeyLayoutBodyOverlay()
+		return
+	}
+	m.syncNewKeyLayoutModal()
+}
+
+func (m *Model) syncNewKeyLayoutBodyOverlay() {
+	m.NewKeyValue.SetWidth(m.Width)
+	h := m.panelAreaLines() - 2
+	if h < 1 {
+		h = 1
+	}
+	m.NewKeyValue.SetHeight(h)
+}
+
+func (m *Model) syncNewKeyLayoutModal() {
 	inputW := min(62, max(36, m.Width*2/3-8))
 	m.NewKeyTTL.Width = inputW
 	m.NewKeyName.Width = inputW
