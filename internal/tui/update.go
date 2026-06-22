@@ -1400,11 +1400,15 @@ func (m *Model) copyDetailValue() (tea.Model, tea.Cmd) {
 	text, ok := m.copyableValueText()
 	if !ok {
 		m.ErrMsg = "nothing to copy"
-		return m, nil
+		m.statusClearGen++
+		gen := m.statusClearGen
+		return m, clearStatusAfter(statusMessageDuration, gen)
 	}
 	if err := writeSystemClipboard(text); err != nil {
 		m.ErrMsg = err.Error()
-		return m, nil
+		m.statusClearGen++
+		gen := m.statusClearGen
+		return m, clearStatusAfter(statusMessageDuration, gen)
 	}
 	m.ErrMsg = ""
 	return m, m.statusClearCmd(copiedToClipboardStatus)
@@ -1524,7 +1528,9 @@ func (m *Model) startDetailEdit() (tea.Model, tea.Cmd) {
 	case "hash":
 		if len(d.Hash) == 0 {
 			m.ErrMsg = "no fields to edit"
-			return m, nil
+			m.statusClearGen++
+			gen := m.statusClearGen
+			return m, clearStatusAfter(statusMessageDuration, gen)
 		}
 		field := hashFields(d.Hash)[m.DetailCursor]
 		m.EditField = field
@@ -1534,7 +1540,9 @@ func (m *Model) startDetailEdit() (tea.Model, tea.Cmd) {
 	case "list":
 		if len(d.List) == 0 {
 			m.ErrMsg = "no items to edit"
-			return m, nil
+			m.statusClearGen++
+			gen := m.statusClearGen
+			return m, clearStatusAfter(statusMessageDuration, gen)
 		}
 		m.NewKeyValue.SetValue(d.List[m.DetailCursor])
 		m.NewKeyValue.Placeholder = "item value"
@@ -1542,7 +1550,9 @@ func (m *Model) startDetailEdit() (tea.Model, tea.Cmd) {
 	case "set":
 		if len(d.Set) == 0 {
 			m.ErrMsg = "no members to edit"
-			return m, nil
+			m.statusClearGen++
+			gen := m.statusClearGen
+			return m, clearStatusAfter(statusMessageDuration, gen)
 		}
 		member := d.Set[m.DetailCursor]
 		m.EditField = member
@@ -1552,7 +1562,9 @@ func (m *Model) startDetailEdit() (tea.Model, tea.Cmd) {
 	case "zset":
 		if len(d.ZSet) == 0 {
 			m.ErrMsg = "no members to edit"
-			return m, nil
+			m.statusClearGen++
+			gen := m.statusClearGen
+			return m, clearStatusAfter(statusMessageDuration, gen)
 		}
 		z := d.ZSet[m.DetailCursor]
 		member, _ := z.Member.(string)
@@ -1566,7 +1578,9 @@ func (m *Model) startDetailEdit() (tea.Model, tea.Cmd) {
 	case "stream":
 		if len(d.Stream) == 0 {
 			m.ErrMsg = "no entries to edit"
-			return m, nil
+			m.statusClearGen++
+			gen := m.statusClearGen
+			return m, clearStatusAfter(statusMessageDuration, gen)
 		}
 		entry := d.Stream[m.DetailCursor]
 		m.EditField = entry.ID
@@ -1575,7 +1589,9 @@ func (m *Model) startDetailEdit() (tea.Model, tea.Cmd) {
 		return m, m.openElementEdit(editElement)
 	default:
 		m.ErrMsg = fmt.Sprintf("type %s is not editable", d.Meta.Type)
-		return m, nil
+		m.statusClearGen++
+		gen := m.statusClearGen
+		return m, clearStatusAfter(statusMessageDuration, gen)
 	}
 }
 
