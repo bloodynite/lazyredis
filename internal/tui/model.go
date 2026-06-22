@@ -87,19 +87,10 @@ type Model struct {
 	DetailCursor int
 	DetailScroll int
 	detailGen    uint64
-	// DetailTotal is the O(1) length reported by the Redis summary for
-	// the selected composite key (-1 for strings and unknown types).
-	// DetailLoaded is how many entries of DetailTotal are currently in
-	// m.KeyDetail. The UI silently loads the next chunk when the user
-	// scrolls toward the end.
 	DetailTotal         int64
 	DetailLoaded        int
 	detailChunkPending  bool
-	// detailRetryCount bounds how many times the same selection will
-	// retry after a transient Redis error (most commonly WRONGTYPE
-	// caused by the key changing type between the summary pipeline and
-	// the detail fetch). Reset to 0 on every selection change, every
-	// summary load, and after the error surfaces.
+	// detailRetryCount retries after transient errors WRONGTYPE/LOADING.
 	detailRetryCount    uint8
 
 	refreshGen uint64
@@ -130,13 +121,6 @@ type Model struct {
 
 	DetailSearchInput textinput.Model
 	DetailSearchFocus bool
-	// DetailSearchMatches holds the positions of every match produced by the
-	// most recent detail search apply. For strings each entry is a byte index
-	// of a substring occurrence in the sanitized detail value (newlines
-	// collapsed to the visible marker, the same text the renderer chunks);
-	// for composite types it is the item index of the matching entry.
-	// DetailSearchCursor is the active match index inside this slice (-1
-	// when empty).
 	DetailSearchMatches []int
 	DetailSearchCursor  int
 

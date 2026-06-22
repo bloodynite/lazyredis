@@ -35,11 +35,6 @@ type KeyMeta struct {
 	TTL  time.Duration
 }
 
-// KeySummary is the metadata-only view of a key, fetched in a single
-// pipeline so the UI can show type/ttl and decide whether to fetch the
-// full value lazily. For composite types Total is the O(1) length
-// (HLEN/LLEN/SCARD/ZCARD/XLEN); for strings Total is STRLEN. Total is
-// -1 if the type does not expose a length or the lookup failed.
 type KeySummary struct {
 	Meta  KeyMeta
 	Total int64
@@ -222,12 +217,6 @@ func (c *Client) KeyMeta(ctx context.Context, key string) (*KeyMeta, error) {
 	return &KeyMeta{Key: key, Type: t, TTL: ttl}, nil
 }
 
-// GetKey returns the key detail. offset and limit control the entry
-// window for composite types (hash/list/set/zset/stream). offset < 0 or
-// limit <= 0 means "load everything" (legacy full-load behaviour). The
-// returned KeyDetail only contains the requested window; combine with
-// GetKeySummary to learn the total length without paying for a full
-// fetch.
 func (c *Client) GetKey(ctx context.Context, key string, offset, limit int) (*KeyDetail, error) {
 	meta, err := c.KeyMeta(ctx, key)
 	if err != nil {
@@ -274,9 +263,6 @@ func (c *Client) GetKey(ctx context.Context, key string, offset, limit int) (*Ke
 	return d, nil
 }
 
-// GetKeySummary returns type, TTL, and O(1) length for the key.
-// Callers can show metadata immediately and decide whether to fetch
-// the full value lazily based on Total.
 func (c *Client) GetKeySummary(ctx context.Context, key string) (*KeySummary, error) {
 	t, err := c.rdb.Type(ctx, key).Result()
 	if err != nil {
@@ -320,9 +306,6 @@ func (c *Client) GetKeySummary(ctx context.Context, key string) (*KeySummary, er
 	return &KeySummary{Meta: KeyMeta{Key: key, Type: t, TTL: ttl}, Total: total}, nil
 }
 
-// loadHashWindow returns hash entries for the requested window. Full
-// mode uses HGETALL. Paged mode walks HSCAN cursors until it has the
-// requested window. The field order is whatever HSCAN yields.
 func (c *Client) loadHashWindow(ctx context.Context, key string, offset, limit int, full bool) map[string]string {
 	if full {
 		v, err := c.rdb.HGetAll(ctx, key).Result()
@@ -355,8 +338,6 @@ func (c *Client) loadHashWindow(ctx context.Context, key string, offset, limit i
 	}
 }
 
-// loadSetWindow returns set members for the requested window via SSCAN.
-// The order is whatever SSCAN yields.
 func (c *Client) loadSetWindow(ctx context.Context, key string, offset, limit int, full bool) []string {
 	if full {
 		v, err := c.rdb.SMembers(ctx, key).Result()
@@ -389,10 +370,6 @@ func (c *Client) loadSetWindow(ctx context.Context, key string, offset, limit in
 	}
 }
 
-// loadStreamWindow returns stream entries for the requested window,
-// ordered by ID ascending. Full mode uses XRange without COUNT (an explicit
-// COUNT 0 is rejected by Redis with "redis: nil" — see fix note in commit).
-// Paged mode uses XRangeN with COUNT=limit and skips offset items.
 func (c *Client) loadStreamWindow(ctx context.Context, key string, offset, limit int, full bool) []StreamEntry {
 	var msgs []redis.XMessage
 	if full {

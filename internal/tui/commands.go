@@ -35,14 +35,10 @@ type keysLoadedMsg struct {
 }
 
 type keyDetailMsg struct {
-	detail *store.KeyDetail
-	err    error
-	key    string
-	gen    uint64
-	// chunk indicates this response is a partial window for the current
-	// selection rather than a full reload. The handler appends to the
-	// existing KeyDetail when chunk=true and offset/limit match the
-	// loaded count. appendOffset lets the consumer verify ordering.
+	detail      *store.KeyDetail
+	err         error
+	key         string
+	gen         uint64
 	chunk       bool
 	appendOff   int
 	appendLimit int
@@ -125,15 +121,9 @@ func scanKeys(client *store.Client, cursor uint64, pattern string, appendKeys bo
 				}
 				continue
 			}
-			// TODO(next-session): the non-append path also breaks after the
-			// first non-empty batch, so the initial connect AND auto-refresh
-			// only ever load the first 100 keys. After the user presses g
-			// to load more, the next auto-refresh replaces m.Keys with the
-			// first 100 again and clamps KeyCursor, dropping the
-			// user's pagination progress. Fix: iterate until cur == 0 on
-			// the non-append path so the full set is loaded, or stop
-			// auto-refresh from reloading from cursor 0 and instead honor
-			// m.ScanCursor. See topic_key=architecture/autorefresh-pagination.
+			// TODO: non-append path breaks after first batch, so initial
+			// connect/auto-refresh only loads 100 keys. Auto-refresh then
+			// replaces m.Keys with first 100 again, dropping pagination.
 			if len(batch) > 0 {
 				break
 			}
@@ -142,9 +132,6 @@ func scanKeys(client *store.Client, cursor uint64, pattern string, appendKeys bo
 	}
 }
 
-// loadKeyDetailFn and loadKeySummaryFn are exposed as vars so tests
-// can replace them with recorders that capture the requested offset/
-// limit without spinning up a real Redis client.
 var (
 	loadKeyDetailFn  = loadKeyDetail
 	loadKeySummaryFn = loadKeySummary
@@ -515,11 +502,6 @@ func removeStreamEntry(client *store.Client, key, id string) tea.Cmd {
 	}
 }
 
-// submitBoundaryFuncs are the patch/add/replace functions that
-// submitElementEdit dispatches to for each Redis write. They are exposed as
-// vars so tests can swap any of them with a recording fake and assert on the
-// exact payload forwarded past the textarea (e.g. that whitespace is not
-// trimmed) without spinning up a real Redis client.
 var (
 	patchStringValueFn    = patchStringValue
 	patchHashFieldFn      = patchHashField

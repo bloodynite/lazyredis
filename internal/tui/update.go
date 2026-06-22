@@ -198,11 +198,8 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.detailRetryCount > 0 {
 			m.ErrMsg = ""
 		}
-		m.DetailTotal = msg.summary.Total
-		// Decide whether the first request is a full load or a chunk.
-		// Threshold matches detailChunkSize: anything at or below one chunk
-		// is loaded in a single round-trip; anything larger is paged.
-		if msg.summary.Meta.Type == "string" ||
+	m.DetailTotal = msg.summary.Total
+	if msg.summary.Meta.Type == "string" ||
 			msg.summary.Total <= 0 ||
 			int(msg.summary.Total) <= detailChunkSize {
 			m.DetailLoaded = int(detailTotalOrZero(m.DetailTotal, msg.summary.Meta.Type))
@@ -210,8 +207,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.Loading = true
 			return m, loadKeyDetailFn(m.Client, msg.summary.Meta.Key, -1, 0, m.detailGen, false)
 		}
-		// Paginated: load the first chunk.
-		m.DetailLoaded = 0
+	m.DetailLoaded = 0
 		m.detailChunkPending = false
 		m.Loading = true
 		return m, loadKeyDetailFn(m.Client, msg.summary.Meta.Key, 0, detailChunkSize, m.detailGen, false)
@@ -231,7 +227,6 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.ErrMsg = ""
 		}
 		if !msg.chunk {
-			// Full reload (first fetch after summary, or refresh).
 			prevCursor := m.DetailSearchCursor
 			sameKey := m.KeyDetail != nil &&
 				m.KeyDetail.Meta.Key == msg.detail.Meta.Key
@@ -246,7 +241,6 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			return m, nil
 		}
-		// Append chunk onto the existing detail slice for the matching type.
 		mergeChunkIntoDetail(m.KeyDetail, msg.detail, msg.appendOff)
 		m.DetailLoaded = compositeLoadedCount(m.KeyDetail)
 		return m, nil
@@ -443,19 +437,6 @@ func (m *Model) applySearchPattern() (*Model, tea.Cmd) {
 	return m, scanKeys(m.Client, 0, m.ScanPattern, false, m.scanGen)
 }
 
-// applyDetailSearch scrolls or moves the detail cursor to the first match
-// for the current DetailSearchInput query and returns the total number of
-// matches found across the detail. Empty query is a no-op and returns 0.
-//
-// On success the match positions and an active cursor pointing at the first
-// match are stored on the model so that n/N can cycle through them.
-//
-// prevCursor and preserveCursor control how the active cursor is positioned
-// when matches exist. By default (preserveCursor false, or prevCursor < 0)
-// the cursor lands on the first match. When preserveCursor is true the
-// cursor stays on prevCursor; if prevCursor falls outside the new match
-// range it clamps to the last match. This keeps the user's navigated
-// position stable across auto-refreshes of the same key.
 func (m *Model) applyDetailSearch(prevCursor int, preserveCursor bool) int {
 	if m.KeyDetail == nil {
 		m.DetailSearchMatches = nil
@@ -486,18 +467,6 @@ func (m *Model) applyDetailSearch(prevCursor int, preserveCursor bool) int {
 	return count
 }
 
-// computeDetailSearchMatches returns every match position in d for query, in
-// document order. For strings positions are byte indices of each non-
-// overlapping substring occurrence; for composite types they are item
-// indices. count mirrors applyDetailSearch's previous return value (raw
-// occurrence count for strings, item count for composites) so status text
-// stays consistent with the old implementation.
-//
-// String search runs against the same sanitized text the renderer feeds
-// to chunkString (newlines collapsed to a visible marker). Without that
-// alignment, a raw byte offset into the unsanitized value points at a
-// completely different chunk than the renderer shows, so the scroll
-// jump lands on a row that has no match.
 func computeDetailSearchMatches(d *store.KeyDetail, query string) (matches []int, count int) {
 	if query == "" {
 		return nil, 0
@@ -563,10 +532,6 @@ func computeDetailSearchMatches(d *store.KeyDetail, query string) (matches []int
 	return matches, count
 }
 
-// jumpToDetailSearchMatch scrolls the detail panel so the match at
-// idxInMatches becomes visible and (for composite types) moves the
-// DetailCursor onto it. idxInIndexes is an index into
-// DetailSearchMatches, not into the underlying value.
 func (m *Model) jumpToDetailSearchMatch(idxInMatches int) {
 	if m.KeyDetail == nil || idxInMatches < 0 || idxInMatches >= len(m.DetailSearchMatches) {
 		return
@@ -598,9 +563,6 @@ func (m *Model) jumpToDetailSearchMatch(idxInMatches int) {
 	m.adjustDetailScroll()
 }
 
-// cycleDetailMatch advances the active match cursor by delta (positive moves
-// forward, negative backward) and jumps to the new match. Wraps around.
-// No-op when there are no stored matches.
 func (m *Model) cycleDetailMatch(delta int) {
 	n := len(m.DetailSearchMatches)
 	if n == 0 {
@@ -614,9 +576,6 @@ func (m *Model) cycleDetailMatch(delta int) {
 	m.jumpToDetailSearchMatch(next)
 }
 
-// detailSearchNavStatus formats the match-position status shown after a
-// next/prev navigation jump (e.g. "match 2/7"). Returns "no matches" when
-// the slice is empty.
 func (m *Model) detailSearchNavStatus() string {
 	n := len(m.DetailSearchMatches)
 	if n == 0 {
@@ -625,8 +584,6 @@ func (m *Model) detailSearchNavStatus() string {
 	return fmt.Sprintf("match %d/%d", m.DetailSearchCursor+1, n)
 }
 
-// detailSearchStatus formats the match-count status line shown after a
-// detail search runs.
 func detailSearchStatus(count int) string {
 	switch count {
 	case 0:
@@ -702,14 +659,6 @@ func (m *Model) handleBrowserKeys(key string, msg tea.KeyMsg) (tea.Model, tea.Cm
 		m.DetailSearchInput.Focus()
 		return m, nil
 	}
-	// Detail search next/prev navigation. Only intercepts when the user is on
-	// the detail panel with an applied query that produced matches; outside
-	// this scope the key falls through to its other bindings (notably
-	// actionBrowserNewKey, which uses "n" on the keys panel).
-	//
-	// The direction is decided from the raw rune rather than matchAction
-	// because the keymap lowercases every key during matching, which would
-	// collapse Shift+N into n and break the prev direction.
 	if m.PanelFocus == panelDetail && m.KeyDetail != nil &&
 		!m.DetailSearchFocus && m.DetailSearchInput.Value() != "" &&
 		len(m.DetailSearchMatches) > 0 &&
@@ -1260,8 +1209,6 @@ func detailItemCount(d *store.KeyDetail) int {
 	}
 }
 
-// detailTotalOrZero returns the composite length when it is fully
-// loaded, or 0 for non-composite / unknown types.
 func detailTotalOrZero(total int64, keyType string) int64 {
 	if keyType == "string" || keyType == "" {
 		return 0
@@ -1328,9 +1275,6 @@ func (m *Model) handleDetailError(errMsg string) tea.Cmd {
 	return tea.Batch(loadKeySummaryFn(m.Client, m.SelectedKey, m.detailGen), clearStatusAfter(statusMessageDuration, gen))
 }
 
-// WRONGTYPE means a key changed type between the summary TYPE call and
-// the detail fetch; LOADING means Redis is loading the dataset. Both
-// resolve with a fresh summary on the same key.
 func looksLikeRetriableDetailError(msg string) bool {
 	return strings.Contains(msg, "WRONGTYPE") ||
 		strings.Contains(msg, "LOADING")
@@ -1376,11 +1320,8 @@ const (
 	copiedToClipboardStatus = "copied to clipboard"
 	statusMessageDuration  = 3 * time.Second
 	detailDebounceDuration = 80 * time.Millisecond
-	// detailChunkSize is entries per composite fetch.
-	detailChunkSize = 200
-	// detailChunkLookahead triggers the next chunk when the cursor
-	// gets this close to the end of the loaded window.
-	detailChunkLookahead = 50
+	detailChunkSize        = 200
+	detailChunkLookahead   = 50
 )
 
 func (m *Model) statusClearCmd(msg string) tea.Cmd {
@@ -1495,11 +1436,6 @@ func (m *Model) copyableValueText() (string, bool) {
 	}
 }
 
-// elementEditUsesTextarea reports whether the current element edit modal
-// should be rendered and fed by the NewKeyValue textarea. Detail-panel value
-// edits (string/hash/list/set/zset/stream, add or update) all go through the
-// textarea so users can paste multi-line payloads and edit values that span
-// several lines; single-line metadata (field/member/id) lives on EditField.
 func (m *Model) elementEditUsesTextarea() bool {
 	return m.EditMode == editElement || m.EditMode == editElementAdd
 }
@@ -1569,9 +1505,6 @@ func (m *Model) startDetailEdit() (tea.Model, tea.Cmd) {
 		z := d.ZSet[m.DetailCursor]
 		member, _ := z.Member.(string)
 		m.EditField = member
-		// Use a single-space separator instead of FormatZSetLine's tab so the
-		// textarea (which replaces tabs with 4 spaces) preserves a parseable
-		// "score member" line.
 		m.NewKeyValue.SetValue(strconv.FormatFloat(z.Score, 'g', -1, 64) + " " + member)
 		m.NewKeyValue.Placeholder = "score<TAB>member"
 		return m, m.openElementEdit(editElement)
@@ -1672,11 +1605,6 @@ func (m *Model) submitElementEdit() (tea.Model, tea.Cmd) {
 	if m.Client == nil || m.KeyDetail == nil {
 		return m, nil
 	}
-	// Redis payloads are exact bytes/text. String, hash field, list item, and
-	// set member edits must preserve leading, trailing, and embedded whitespace
-	// verbatim; downstream parsers (ParseHashFieldLine, ParseZSetLine,
-	// ParseStreamFields) already trim where Redis semantics need it
-	// (field name, score, blank-line skip) and forward values intact.
 	value := m.NewKeyValue.Value()
 	m.Loading = true
 	key := m.SelectedKey
@@ -1690,9 +1618,6 @@ func (m *Model) submitElementEdit() (tea.Model, tea.Cmd) {
 		if m.EditMode == editElementAdd {
 			return m, addHashFieldFn(m.Client, key, value)
 		}
-		// Edit mode: NewKeyValue carries only the new value; the field name
-		// is preserved on EditField, so we send it straight to patchHashField
-		// without re-parsing a "field=value" line.
 		return m, patchHashFieldFn(m.Client, key, m.EditField, value)
 	case "list":
 		if m.EditMode == editElementAdd {
@@ -1703,14 +1628,11 @@ func (m *Model) submitElementEdit() (tea.Model, tea.Cmd) {
 		if m.EditMode == editElementAdd {
 			return m, addSetMemberFn(m.Client, key, value)
 		}
-		// NewKeyValue holds the new member; EditField holds the old member.
 		return m, replaceSetMemberFn(m.Client, key, m.EditField, value)
 	case "zset":
 		if m.EditMode == editElementAdd {
 			return m, addZSetMemberFn(m.Client, key, value)
 		}
-		// NewKeyValue holds "score member" (or pasted "score\tmember");
-		// EditField holds the old member. ParseZSetLine accepts either form.
 		return m, replaceZSetMemberFn(m.Client, key, m.EditField, value)
 	case "stream":
 		if m.EditMode == editElementAdd {

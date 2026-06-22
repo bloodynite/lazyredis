@@ -57,9 +57,6 @@ func initStyles() {
 			Background(lipgloss.Color("3")).
 			Foreground(lipgloss.Color("0")).
 			Bold(true)
-	// activeSearchMatchStyle marks the match the user is currently navigated
-	// to (via n/N). It must stay visually distinct from searchMatchStyle so
-	// the active hit stands out from other matches in the same chunk.
 	activeSearchMatchStyle = lipgloss.NewStyle().
 				Background(lipgloss.Color("1")).
 				Foreground(lipgloss.Color("7")).
@@ -90,9 +87,6 @@ func initStyles() {
 		Padding(1, 2)
 	confirmMsgStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("3"))
 	confirmHintStyle = lipgloss.NewStyle().Foreground(faint)
-	// helpGroupTitleStyle separates each scope group (Global, Browser · Keys
-	// panel, …) inside the help modal so the user can scan the reference by
-	// context.
 	helpGroupTitleStyle = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("4"))
 }
 

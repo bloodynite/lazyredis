@@ -54,37 +54,19 @@ const (
 	actionConfirmNo  = "confirm.no"
 )
 
-// bindScope labels a binding's logical context so the keybar can pick the
-// right subset for the current focus and the help modal can group bindings
-// under headings.
 type bindScope int
 
 const (
-	// scopeGlobal applies regardless of screen or focus (help, force quit).
 	scopeGlobal bindScope = iota
-	// scopeProfiles: profiles list screen.
 	scopeProfiles
-	// scopeProfileForm: profile form (create / edit profile).
 	scopeProfileForm
-	// scopeBrowserCommon: bindings that work anywhere in the browser screen
-	// regardless of panel focus (disconnect, switch panel, scroll, flush).
 	scopeBrowserCommon
-	// scopeBrowserKeys: bindings that only apply when the keys panel is
-	// focused (filter, new key, refresh, auto refresh, load more, plus the
-	// selected-key ops that route through the keys panel).
 	scopeBrowserKeys
-	// scopeBrowserDetail: bindings that only apply when the detail panel is
-	// focused (search value, add/edit/delete items, edit value, copy, ttl).
 	scopeBrowserDetail
-	// scopeKeyFilter: key filter input is focused.
 	scopeKeyFilter
-	// scopeDetailSearch: detail search input is focused.
 	scopeDetailSearch
-	// scopeKeyEdit: key editor screen.
 	scopeKeyEdit
-	// scopeConfirm: confirm modal.
 	scopeConfirm
-	// scopeHelp: help modal close key.
 	scopeHelp
 )
 
@@ -94,7 +76,6 @@ type bindDef struct {
 	scope bindScope
 }
 
-// helpGroup is a heading + the bindings displayed under it in the help modal.
 type helpGroup struct {
 	Title string
 	Defs  []bindDef
@@ -146,8 +127,6 @@ var defaultKeyMap = map[string][]string{
 	actionConfirmYes: {"y"},
 	actionConfirmNo:  {"n", "esc"},
 
-	// Save participates in the same ctrl→alt transform as every other
-	// ctrl-prefixed binding; settings.shortcut_modifier applies globally.
 	actionSave: {"ctrl+s"},
 }
 
@@ -157,10 +136,6 @@ func normalizeKey(key string) string {
 	return key
 }
 
-// applyShortcutModifier rewrites a ctrl-prefixed binding to use the
-// configured shortcut modifier. Anything that does not start with "ctrl+"
-// is returned untouched so non-modifier keys (single keys, "tab",
-// "shift+tab", "enter", ...) survive the global transform.
 func applyShortcutModifier(key, modifier string) string {
 	if modifier == "alt" && strings.HasPrefix(key, "ctrl+") {
 		return "alt+" + strings.TrimPrefix(key, "ctrl+")
@@ -168,9 +143,6 @@ func applyShortcutModifier(key, modifier string) string {
 	return key
 }
 
-// shortcutModifier resolves the user-configured modifier for derived
-// shortcuts. Anything other than "alt" (including an unset config) keeps
-// the default ctrl prefix.
 func shortcutModifier(cfg *config.File) string {
 	if cfg != nil && cfg.GetShortcutModifier() == "alt" {
 		return "alt"
@@ -301,18 +273,12 @@ func (m *Model) appendHelpBind(binds []keyBind) []keyBind {
 	return append(binds, m.bindEntry(actionAppHelp, "help"))
 }
 
-// applicableHelpActions returns the flat, deduped list of bindings for the
-// current focus. Global and Help-close entries are excluded because the keybar
-// appends them itself (last line, always pinned). This is the function the
-// keybar consumes and existing tests rely on.
 func (m *Model) applicableHelpActions() []bindDef {
 	seen := make(map[string]struct{}, 16)
 	var out []bindDef
 	for _, g := range m.activeHelpGroups() {
 		for _, d := range g.Defs {
-			// Skip global/help-close scopes — the keybar appends those
-			// explicitly so they always end up pinned to line 2.
-			if d.scope == scopeGlobal || d.scope == scopeHelp {
+		if d.scope == scopeGlobal || d.scope == scopeHelp {
 				continue
 			}
 			if _, ok := seen[d.id]; ok {
@@ -325,15 +291,8 @@ func (m *Model) applicableHelpActions() []bindDef {
 	return out
 }
 
-// activeHelpGroups returns the scopes that should drive the keybar for the
-// current focus. It is a subset of helpGroups: it only includes the panel
-// scope (keys or detail) the user is currently on, so that the keybar does
-// not duplicate bindings shared across panels (notably `/` and `c`).
 func (m *Model) activeHelpGroups() []helpGroup {
 	groups := []helpGroup{
-		// Global binds (help, force quit) live outside the scope groups
-		// here; applicableHelpActions filters them out and keyBinds appends
-		// them itself.
 		{},
 	}
 	switch m.Screen {
@@ -365,11 +324,6 @@ func (m *Model) activeHelpGroups() []helpGroup {
 	return groups
 }
 
-// helpGroups returns the full list of scope groups to display in the help
-// modal. Unlike activeHelpGroups it always emits both the Keys-panel and
-// Detail-panel groups for the browser screen (plus a Global and a Help-close
-// group) so the modal acts as a complete reference of every shortcut the
-// user can press in the current screen, regardless of focus.
 func (m *Model) helpGroups() []helpGroup {
 	groups := []helpGroup{
 		{Title: "Global", Defs: []bindDef{
@@ -497,9 +451,6 @@ func (m *Model) detailSearchDefs() []bindDef {
 		{actionBrowserFilterApply, "apply search", scopeDetailSearch},
 		{actionBrowserFilterCancel, "close search", scopeDetailSearch},
 	}
-	// n/N only cycle matches after a successful apply — surface them in
-	// the help modal only when the conditions are met so the hint stays
-	// honest.
 	if m.DetailSearchInput.Value() != "" && len(m.DetailSearchMatches) > 0 {
 		defs = append(defs,
 			bindDef{actionBrowserDetailSearchNext, "next match", scopeDetailSearch},

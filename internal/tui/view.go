@@ -406,8 +406,6 @@ func (m *Model) renderDetailPanel(panelW, height int) string {
 	return clipPanelLines(lines, height)
 }
 
-// detailSearchQuery returns the active query for highlighting in the detail
-// panel, or "" when no query is currently active.
 func (m *Model) detailSearchQuery() string {
 	if m.DetailSearchInput.Value() == "" {
 		return ""
@@ -418,11 +416,6 @@ func (m *Model) detailSearchQuery() string {
 	return m.DetailSearchInput.Value()
 }
 
-// isActiveDetailMatch reports whether the detail item at composite index idx
-// is the match the user is currently navigated to via n/N. For strings,
-// where matches are byte offsets not item indices, this is always false —
-// the string path computes the active chunk directly from
-// DetailSearchMatches/DetailSearchCursor.
 func (m *Model) isActiveDetailMatch(idx int) bool {
 	if m.DetailSearchCursor < 0 || m.DetailSearchCursor >= len(m.DetailSearchMatches) {
 		return false
@@ -436,9 +429,6 @@ func (m *Model) renderDetailBody(d *store.KeyDetail, panelW, listH int, query st
 
 	switch d.Meta.Type {
 	case "string":
-		// For strings, the active match is a byte offset into the value.
-		// Translate it to (chunkIdx, offsetWithinChunk) so the chunk
-		// containing the navigated match can highlight it distinctly.
 		activeChunk, activeOffset := -1, -1
 		if m.DetailSearchCursor >= 0 && m.DetailSearchCursor < len(m.DetailSearchMatches) {
 			maxW := max(8, panelW-4)
@@ -494,8 +484,6 @@ func (m *Model) renderDetailBody(d *store.KeyDetail, panelW, listH int, query st
 	return lines
 }
 
-// compositeRowPrefix returns the leading glyph for a composite detail row,
-// using "▸ " for the cursor row and "  " otherwise.
 func compositeRowPrefix(i int, inDetail bool, cursor int) string {
 	if inDetail && i == cursor {
 		return "▸ "
@@ -503,17 +491,8 @@ func compositeRowPrefix(i int, inDetail bool, cursor int) string {
 	return "  "
 }
 
-// detailNewlineMarker is rendered in place of any newline (LF / CR / CRLF)
-// found in a detail body line. It guarantees that one logical row never
-// spans more than one physical terminal row, which keeps the detail panel
-// within its allocated height even when Redis values contain embedded
-// newlines.
 const detailNewlineMarker = "↵"
 
-// sanitizeDetailRow replaces every newline sequence in s with a visible
-// marker so the result is safe to render as a single physical terminal
-// line. The fast path is a ContainsAny check so strings without any
-// newline go through unchanged.
 func sanitizeDetailRow(s string) string {
 	if !strings.ContainsAny(s, "\r\n") {
 		return s
@@ -524,26 +503,12 @@ func sanitizeDetailRow(s string) string {
 	return s
 }
 
-// renderCompositeRow renders a single row of a composite detail (hash,
-// list, set, zset, stream) with the appropriate cursor / active-match
-// styling. lineFn builds the raw text for the row; this helper decides how
-// to style it:
-//
-//   - active match row (cursor on the n/N-selected match with an applied
-//     query): matched substring wrapped in activeSearchMatchStyle, rest of
-//     the row uses normalStyle so the active highlight is visible.
-//   - cursor row without active search: full row wrapped in selectedStyle
-//     (existing reverse-video cursor behavior).
-//   - any other row: normalStyle with matched substring wrapped in
-//     searchMatchStyle.
 func (m *Model) renderCompositeRow(query string, inDetail bool, idx int, lineFn func() string) []string {
 	line := sanitizeDetailRow(lineFn())
 	isCursor := inDetail && idx == m.DetailCursor
 	isActive := isCursor && m.isActiveDetailMatch(idx)
 	switch {
 	case isActive && query != "":
-		// Active match: highlight matched substring with activeSearchMatchStyle
-		// and skip selectedStyle so the active highlight is visible.
 		rendered := normalStyle.Render(line)
 		rendered = highlightAllWithStyle(rendered, query, activeSearchMatchStyle)
 		return []string{rendered}
@@ -850,22 +815,14 @@ func (m *Model) renderHelpModal() string {
 	lines = append(lines, panelTitleStyle.Render("Keyboard shortcuts"))
 	lines = append(lines, "")
 	for _, g := range groups {
-		// Always emit the heading (even if the group has no entries right
-		// now) so the user can see the full layout of scopes for this
-		// screen — e.g. "Browser · Detail panel" stays visible when no
-		// key is selected.
 		if g.Title != "" {
 			lines = append(lines, helpGroupTitleStyle.Render(g.Title))
 		}
 		for _, def := range g.Defs {
 			lines = append(lines, fmt.Sprintf("  %-16s %s", formatBindKeys(m.bindKeys(def.id)), def.desc))
 		}
-		// Insert a blank separator between groups even when the group body
-		// is empty, so headings never visually collide.
 		lines = append(lines, "")
 	}
-	// Trim trailing blank so the modal does not gain an empty line at the
-	// bottom when we already added one above.
 	if len(lines) > 0 && lines[len(lines)-1] == "" {
 		lines = lines[:len(lines)-1]
 	}
@@ -926,9 +883,6 @@ func wrapValueWithQuery(label, value, query string, width, maxLines, scroll, act
 	bodyVisible := maxLines - 1
 	for i, chunk := range chunks[scroll:min(len(chunks), scroll+bodyVisible)] {
 		actualChunkIdx := scroll + i
-		// Highlight the chunk's matches; the chunk that contains the
-		// currently-navigated active match renders that one occurrence in
-		// activeSearchMatchStyle so it stands out from the rest.
 		var rendered string
 		if actualChunkIdx == activeChunk && query != "" {
 			rendered = highlightChunkActive(chunk, query, activeOffset)
@@ -940,8 +894,6 @@ func wrapValueWithQuery(label, value, query string, width, maxLines, scroll, act
 	return lines
 }
 
-// highlightSubstring returns s with every non-overlapping occurrence of query
-// wrapped in searchMatchStyle. Empty query returns s unchanged.
 func highlightSubstring(s, query string) string {
 	if query == "" {
 		return s
@@ -952,11 +904,6 @@ func highlightSubstring(s, query string) string {
 	return highlightAllWithStyle(s, query, searchMatchStyle)
 }
 
-// highlightChunkActive highlights every non-overlapping occurrence of query in
-// chunk. The occurrence that starts at activeOffset is highlighted with
-// activeSearchMatchStyle; every other occurrence is highlighted with the
-// regular searchMatchStyle. activeOffset < 0 disables the active
-// distinction and behaves like highlightSubstring.
 func highlightChunkActive(chunk, query string, activeOffset int) string {
 	if query == "" || !strings.Contains(chunk, query) {
 		return chunk
@@ -984,8 +931,6 @@ func highlightChunkActive(chunk, query string, activeOffset int) string {
 	return out.String()
 }
 
-// highlightAllWithStyle wraps every non-overlapping occurrence of query in
-// style. Empty query returns s unchanged.
 func highlightAllWithStyle(s, query string, style lipgloss.Style) string {
 	var out strings.Builder
 	cursor := 0
@@ -1004,9 +949,6 @@ func highlightAllWithStyle(s, query string, style lipgloss.Style) string {
 }
 
 func chunkString(s string, size int) []string {
-	// Sanitize first: a chunk that contains a real newline would render as
-	// multiple physical terminal rows and overflow the detail panel. The
-	// visible marker preserves the cue that the value had a newline.
 	s = sanitizeDetailRow(s)
 	if len(s) <= size {
 		return []string{s}
@@ -1022,13 +964,7 @@ func chunkString(s string, size int) []string {
 	return out
 }
 
-// truncate shortens s to at most n display columns, replacing any chars
-// beyond the limit with a trailing ellipsis. The naive implementation
-// (lipgloss.Width of the full string + per-rune Width calls in a loop)
-// ran O(n^2) over multi-KB hash field values, blocking View() for seconds
-// per render and freezing the UI on Ctrl+C. The fast version walks the
-// rune slice once, accumulating width and stopping at the first run that
-// would exceed n-1 (leaving room for the ellipsis).
+// truncate walks runes once (O(n) vs O(n²) in naive impl).
 func truncate(s string, n int) string {
 	if n <= 3 {
 		return s
