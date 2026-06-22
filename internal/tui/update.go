@@ -165,8 +165,10 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if len(m.Keys) > 0 {
 			m.SelectedKey = m.Keys[m.KeyCursor]
 			m.detailGen++
+			m.DetailTotal = -1
+			m.DetailLoaded = 0
 			m.Loading = true
-			return m, loadKeyDetail(m.Client, m.SelectedKey, m.detailGen)
+			return m, loadKeySummaryFn(m.Client, m.SelectedKey, m.detailGen)
 		}
 		m.SelectedKey = ""
 		m.KeyDetail = nil
@@ -192,13 +194,13 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.DetailLoaded = int(detailTotalOrZero(m.DetailTotal, msg.summary.Meta.Type))
 			m.detailChunkPending = false
 			m.Loading = true
-			return m, loadKeyDetail(m.Client, msg.summary.Meta.Key, -1, 0, m.detailGen, false)
+			return m, loadKeyDetailFn(m.Client, msg.summary.Meta.Key, -1, 0, m.detailGen, false)
 		}
 		// Paginated: load the first chunk.
 		m.DetailLoaded = 0
 		m.detailChunkPending = false
 		m.Loading = true
-		return m, loadKeyDetail(m.Client, msg.summary.Meta.Key, 0, detailChunkSize, m.detailGen, false)
+		return m, loadKeyDetailFn(m.Client, msg.summary.Meta.Key, 0, detailChunkSize, m.detailGen, false)
 
 	case keyDetailMsg:
 		if msg.gen != m.detailGen || msg.key != m.SelectedKey {
@@ -241,7 +243,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		m.Loading = true
-		return m, loadKeySummary(m.Client, msg.key, msg.gen)
+		return m, loadKeySummaryFn(m.Client, msg.key, msg.gen)
 
 	case actionDoneMsg:
 		m.Loading = false
@@ -281,7 +283,9 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			if msg.reload && m.Client != nil && m.SelectedKey != "" {
 				m.detailGen++
-				return m, tea.Batch(loadKeyDetail(m.Client, m.SelectedKey, m.detailGen), statusCmd)
+				m.DetailTotal = -1
+				m.DetailLoaded = 0
+				return m, tea.Batch(loadKeySummaryFn(m.Client, m.SelectedKey, m.detailGen), statusCmd)
 			}
 			return m, statusCmd
 		}
@@ -292,7 +296,9 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.reload && m.Screen == ScreenBrowser && m.Client != nil && m.SelectedKey != "" {
 			m.Loading = true
 			m.detailGen++
-			return m, tea.Batch(loadKeyDetail(m.Client, m.SelectedKey, m.detailGen), statusCmd)
+			m.DetailTotal = -1
+			m.DetailLoaded = 0
+			return m, tea.Batch(loadKeySummaryFn(m.Client, m.SelectedKey, m.detailGen), statusCmd)
 		}
 		return m, statusCmd
 	}
@@ -717,12 +723,12 @@ func (m *Model) handleBrowserKeys(key string, msg tea.KeyMsg) (tea.Model, tea.Cm
 		if m.PanelFocus == panelKeys {
 			return m.moveKeyCursor(1)
 		}
-		m.detailMove(1)
+		return m.detailMove(1)
 	case m.matchAction(actionBrowserUp, key):
 		if m.PanelFocus == panelKeys {
 			return m.moveKeyCursor(-1)
 		}
-		m.detailMove(-1)
+		return m.detailMove(-1)
 	case m.matchAction(actionBrowserFilter, key):
 		m.PanelFocus = panelKeys
 		m.SearchFocus = true
@@ -1166,9 +1172,9 @@ func (m *Model) adjustKeyScroll() {
 	}
 }
 
-func (m *Model) detailMove(delta int) {
+func (m *Model) detailMove(delta int) (tea.Model, tea.Cmd) {
 	if m.KeyDetail == nil {
-		return
+		return m, nil
 	}
 	if m.KeyDetail.Meta.Type == "string" {
 		_, rightW := m.browserPanelWidths()
@@ -1179,14 +1185,15 @@ func (m *Model) detailMove(delta int) {
 		visible := max(1, m.browserContentHeight()-4)
 		limit := stringDetailScrollLimit(m.KeyDetail.String, panelW, visible)
 		m.DetailScroll = clamp(m.DetailScroll+delta, 0, limit)
-		return
+		return m, nil
 	}
 	max := detailItemCount(m.KeyDetail) - 1
 	if max < 0 {
-		return
+		return m, nil
 	}
 	m.DetailCursor = clamp(m.DetailCursor+delta, 0, max)
 	m.adjustDetailScroll()
+	return m, m.maybeLoadMoreDetail()
 }
 
 func (m *Model) adjustDetailScroll() {
@@ -1216,6 +1223,86 @@ func detailItemCount(d *store.KeyDetail) int {
 	}
 }
 
+// detailTotalOrZero returns the length of the composite key in detail
+// when it is fully loaded, or 0 when the type is non-composite / the
+// length is unknown. Used by the summary handler to record how many
+// entries of DetailTotal are immediately visible after a full fetch.
+func detailTotalOrZero(total int64, keyType string) int64 {
+	if keyType == "string" || keyType == "" {
+		return 0
+	}
+	if total < 0 {
+		return 0
+	}
+	return total
+}
+
+// compositeLoadedCount returns the number of composite entries
+// currently loaded into d. For paged fetches this is the size of the
+// loaded window, not the key's total length.
+func compositeLoadedCount(d *store.KeyDetail) int {
+	if d == nil {
+		return 0
+	}
+	return detailItemCount(d)
+}
+
+// mergeChunkIntoDetail appends the entries from src into dst, starting
+// at offset. The two details must be for the same key+type; this is
+// guaranteed by the caller (detailGen + key match in the message
+// handler). For ordered types (list, zset, stream) src is appended in
+// order. For unordered types (hash, set) the chunk is merged and the
+// caller may re-sort as needed at render time.
+func mergeChunkIntoDetail(dst, src *store.KeyDetail, offset int) {
+	if dst == nil || src == nil {
+		return
+	}
+	switch dst.Meta.Type {
+	case "hash":
+		if dst.Hash == nil {
+			dst.Hash = make(map[string]string, len(src.Hash))
+		}
+		for k, v := range src.Hash {
+			dst.Hash[k] = v
+		}
+	case "list":
+		dst.List = append(dst.List, src.List...)
+	case "set":
+		dst.Set = append(dst.Set, src.Set...)
+	case "zset":
+		dst.ZSet = append(dst.ZSet, src.ZSet...)
+	case "stream":
+		dst.Stream = append(dst.Stream, src.Stream...)
+	}
+}
+
+// maybeLoadMoreDetail fires a next-chunk fetch when the cursor is
+// within detailChunkLookahead of the end of the currently loaded
+// window and the key's total is larger than what we have. It is a
+// no-op when the cursor is still inside the loaded range or when a
+// chunk is already in flight. Returns the cmd to run, or nil.
+func (m *Model) maybeLoadMoreDetail() tea.Cmd {
+	if m.Client == nil || m.KeyDetail == nil {
+		return nil
+	}
+	if m.detailChunkPending {
+		return nil
+	}
+	if !compositeKeyType(m.KeyDetail.Meta.Type) {
+		return nil
+	}
+	loaded := compositeLoadedCount(m.KeyDetail)
+	if int64(loaded) >= m.DetailTotal {
+		return nil
+	}
+	if m.DetailCursor < loaded-detailChunkLookahead {
+		return nil
+	}
+	m.detailChunkPending = true
+	m.Loading = true
+	return loadKeyDetailFn(m.Client, m.SelectedKey, loaded, detailChunkSize, m.detailGen, true)
+}
+
 func stringDetailScrollLimit(value string, panelW, listH int) int {
 	if listH < 1 {
 		listH = 1
@@ -1234,6 +1321,15 @@ const (
 	copiedToClipboardStatus = "copied to clipboard"
 	statusMessageDuration   = 3 * time.Second
 	detailDebounceDuration  = 80 * time.Millisecond
+	// detailChunkSize is the number of entries (hash fields, list items,
+	// set members, zset members, stream entries) loaded per round-trip.
+	// One chunk is enough for the visible viewport of every supported
+	// terminal size; further chunks are auto-loaded as the user scrolls.
+	detailChunkSize = 200
+	// detailChunkLookahead triggers a next-chunk load when the cursor is
+	// within this many entries of the end of the currently loaded
+	// window. Prevents a visible gap when the user holds j or G.
+	detailChunkLookahead = 50
 )
 
 func (m *Model) statusClearCmd(msg string) tea.Cmd {
@@ -1652,7 +1748,7 @@ func (m *Model) refreshDataCmd() []tea.Cmd {
 		scanKeys(m.Client, 0, m.ScanPattern, false, gen),
 	}
 	if m.SelectedKey != "" {
-		cmds = append(cmds, loadKeyDetail(m.Client, m.SelectedKey, detailGen))
+		cmds = append(cmds, loadKeySummaryFn(m.Client, m.SelectedKey, detailGen))
 	}
 	return cmds
 }

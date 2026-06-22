@@ -133,6 +133,14 @@ func scanKeys(client *store.Client, cursor uint64, pattern string, appendKeys bo
 	}
 }
 
+// loadKeyDetailFn and loadKeySummaryFn are exposed as vars so tests
+// can replace them with recorders that capture the requested offset/
+// limit without spinning up a real Redis client.
+var (
+	loadKeyDetailFn  = loadKeyDetail
+	loadKeySummaryFn = loadKeySummary
+)
+
 func loadKeyDetail(client *store.Client, key string, offset, limit int, gen uint64, chunk bool) tea.Cmd {
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
