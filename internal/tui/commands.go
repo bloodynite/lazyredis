@@ -125,6 +125,15 @@ func scanKeys(client *store.Client, cursor uint64, pattern string, appendKeys bo
 				}
 				continue
 			}
+			// TODO(next-session): the non-append path also breaks after the
+			// first non-empty batch, so the initial connect AND auto-refresh
+			// only ever load the first 100 keys. After the user presses g
+			// to load more, the next auto-refresh replaces m.Keys with the
+			// first 100 again and clamps KeyCursor, dropping the
+			// user's pagination progress. Fix: iterate until cur == 0 on
+			// the non-append path so the full set is loaded, or stop
+			// auto-refresh from reloading from cursor 0 and instead honor
+			// m.ScanCursor. See topic_key=architecture/autorefresh-pagination.
 			if len(batch) > 0 {
 				break
 			}
