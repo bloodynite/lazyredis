@@ -95,6 +95,11 @@ type Model struct {
 	DetailTotal         int64
 	DetailLoaded        int
 	detailChunkPending  bool
+	// detailRetryCount bounds how many times the same selection will
+	// retry after a transient Redis error (most commonly WRONGTYPE
+	// caused by the key changing type between the summary pipeline and
+	// the detail fetch). Reset to 0 on every selection change.
+	detailRetryCount    uint8
 
 	refreshGen uint64
 

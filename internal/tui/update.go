@@ -165,6 +165,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if len(m.Keys) > 0 {
 			m.SelectedKey = m.Keys[m.KeyCursor]
 			m.detailGen++
+			m.detailRetryCount = 0
 			m.DetailTotal = -1
 			m.DetailLoaded = 0
 			m.Loading = true
@@ -180,8 +181,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		if msg.err != nil {
 			m.Loading = false
-			m.ErrMsg = msg.err.Error()
-			return m, nil
+			return m, m.handleDetailError(msg.err.Error())
 		}
 		m.Loading = false
 		m.DetailTotal = msg.summary.Total
@@ -209,8 +209,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.err != nil {
 			m.Loading = false
 			m.detailChunkPending = false
-			m.ErrMsg = msg.err.Error()
-			return m, nil
+			return m, m.handleDetailError(msg.err.Error())
 		}
 		m.Loading = false
 		m.detailChunkPending = false
@@ -283,6 +282,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			if msg.reload && m.Client != nil && m.SelectedKey != "" {
 				m.detailGen++
+				m.detailRetryCount = 0
 				m.DetailTotal = -1
 				m.DetailLoaded = 0
 				return m, tea.Batch(loadKeySummaryFn(m.Client, m.SelectedKey, m.detailGen), statusCmd)
@@ -296,6 +296,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.reload && m.Screen == ScreenBrowser && m.Client != nil && m.SelectedKey != "" {
 			m.Loading = true
 			m.detailGen++
+			m.detailRetryCount = 0
 			m.DetailTotal = -1
 			m.DetailLoaded = 0
 			return m, tea.Batch(loadKeySummaryFn(m.Client, m.SelectedKey, m.detailGen), statusCmd)
@@ -1276,7 +1277,41 @@ func mergeChunkIntoDetail(dst, src *store.KeyDetail, offset int) {
 	}
 }
 
-// maybeLoadMoreDetail fires a next-chunk fetch when the cursor is
+// handleDetailError decides whether a keySummaryMsg or keyDetailMsg
+// error is recoverable (WRONGTYPE from a type change between summary
+// and detail, or a transient connection blip) and re-fires the
+// summary with a fresh detailGen. After at most one retry the error
+// is surfaced in ErrMsg so the user can see what happened.
+func (m *Model) handleDetailError(errMsg string) tea.Cmd {
+	if m.Client == nil || m.SelectedKey == "" {
+		m.ErrMsg = errMsg
+		return nil
+	}
+	if m.detailRetryCount >= 1 || !looksLikeRetriableDetailError(errMsg) {
+		m.ErrMsg = errMsg
+		m.detailRetryCount = 0
+		return nil
+	}
+	m.detailRetryCount++
+	m.ErrMsg = errMsg + " (retrying)"
+	m.detailGen++
+	m.detailChunkPending = false
+	m.DetailTotal = -1
+	m.DetailLoaded = 0
+	m.Loading = true
+	return loadKeySummaryFn(m.Client, m.SelectedKey, m.detailGen)
+}
+
+// looksLikeRetriableDetailError reports whether the error message
+// describes a race that a fresh TYPE call can resolve. WRONGTYPE
+// happens when the key changed type between the summary pipeline and
+// the detail fetch; "LOADING" happens when Redis is loading the
+// dataset (e.g. right after a flush with appendonly); "LOADING
+// server is busy" and similar transient I/O errors also fit.
+func looksLikeRetriableDetailError(msg string) bool {
+	return strings.Contains(msg, "WRONGTYPE") ||
+		strings.Contains(msg, "LOADING")
+}
 // within detailChunkLookahead of the end of the currently loaded
 // window and the key's total is larger than what we have. It is a
 // no-op when the cursor is still inside the loaded range or when a
