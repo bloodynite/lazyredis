@@ -2,13 +2,14 @@ package tui
 
 import (
 	"fmt"
-	"strings"
 	"runtime/debug"
+	"strings"
+	"unicode/utf8"
 
-	"github.com/charmbracelet/lipgloss"
-	"github.com/mattn/go-runewidth"
 	"github.com/bloodynite/lazyredis/internal/config"
 	"github.com/bloodynite/lazyredis/internal/store"
+	"github.com/charmbracelet/lipgloss"
+	"github.com/mattn/go-runewidth"
 )
 
 func (m *Model) View() string {
@@ -229,7 +230,7 @@ func (m *Model) renderBrowserPanels() string {
 }
 
 func renderTitledPanel(style lipgloss.Style, outerWidth, height int, title, body string) string {
-	panel := style.Width(outerWidth-panelHorizontalPadding).Height(height).Render(body)
+	panel := style.Width(outerWidth - panelHorizontalPadding).Height(height).Render(body)
 	return injectPanelTitle(panel, title, style)
 }
 
@@ -433,8 +434,7 @@ func (m *Model) renderDetailBody(d *store.KeyDetail, panelW, listH int, query st
 		if m.DetailSearchCursor >= 0 && m.DetailSearchCursor < len(m.DetailSearchMatches) {
 			maxW := max(8, panelW-4)
 			pos := m.DetailSearchMatches[m.DetailSearchCursor]
-			activeChunk = pos / maxW
-			activeOffset = pos % maxW
+			activeChunk, activeOffset = chunkPositionForByteOffset(d.String, maxW, pos)
 		}
 		lines = append(lines, wrapValueWithQuery("value", d.String, query, panelW, listH, m.DetailScroll, activeChunk, activeOffset)...)
 	case "hash":
@@ -492,14 +492,16 @@ func compositeRowPrefix(i int, inDetail bool, cursor int) string {
 }
 
 const detailNewlineMarker = "↵"
+const detailTabSpaces = "    "
 
 func sanitizeDetailRow(s string) string {
-	if !strings.ContainsAny(s, "\r\n") {
+	if !strings.ContainsAny(s, "\r\n\t") {
 		return s
 	}
 	s = strings.ReplaceAll(s, "\r\n", detailNewlineMarker)
 	s = strings.ReplaceAll(s, "\n", detailNewlineMarker)
 	s = strings.ReplaceAll(s, "\r", detailNewlineMarker)
+	s = strings.ReplaceAll(s, "\t", detailTabSpaces)
 	return s
 }
 
@@ -950,18 +952,63 @@ func highlightAllWithStyle(s, query string, style lipgloss.Style) string {
 
 func chunkString(s string, size int) []string {
 	s = sanitizeDetailRow(s)
-	if len(s) <= size {
+	if size < 1 {
+		return []string{s}
+	}
+	if chunkDisplayWidth(s) <= size {
 		return []string{s}
 	}
 	var out []string
-	for len(s) > size {
-		out = append(out, s[:size])
-		s = s[size:]
+	for s != "" {
+		_, n := chunkBoundary(s, size)
+		if n <= 0 {
+			break
+		}
+		out = append(out, s[:n])
+		s = s[n:]
 	}
-	if s != "" {
-		out = append(out, s)
+	if len(out) == 0 {
+		return []string{s}
 	}
 	return out
+}
+
+func chunkBoundary(s string, size int) (width, bytes int) {
+	w := 0
+	for i := 0; i < len(s); {
+		r, rn := utf8.DecodeRuneInString(s[i:])
+		if r == utf8.RuneError && rn == 1 {
+			rn = 1
+		}
+		rw := runewidth.RuneWidth(r)
+		if w+rw > size && i > 0 {
+			return w, i
+		}
+		w += rw
+		i += rn
+	}
+	return w, len(s)
+}
+
+func chunkDisplayWidth(s string) int {
+	w := 0
+	for _, r := range s {
+		w += runewidth.RuneWidth(r)
+	}
+	return w
+}
+
+func chunkPositionForByteOffset(s string, size, byteOffset int) (chunkIdx, offsetInChunk int) {
+	chunks := chunkString(s, size)
+	offset := 0
+	for i, c := range chunks {
+		end := offset + len(c)
+		if byteOffset >= offset && byteOffset < end {
+			return i, byteOffset - offset
+		}
+		offset = end
+	}
+	return -1, -1
 }
 
 // truncate walks runes once (O(n) vs O(n²) in naive impl).

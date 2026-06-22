@@ -11,10 +11,10 @@ import (
 
 	"github.com/atotto/clipboard"
 	"github.com/aymanbagabas/go-osc52/v2"
-	"github.com/charmbracelet/bubbles/spinner"
-	tea "github.com/charmbracelet/bubbletea"
 	"github.com/bloodynite/lazyredis/internal/config"
 	"github.com/bloodynite/lazyredis/internal/store"
+	"github.com/charmbracelet/bubbles/spinner"
+	tea "github.com/charmbracelet/bubbletea"
 )
 
 func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -198,8 +198,8 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.detailRetryCount > 0 {
 			m.ErrMsg = ""
 		}
-	m.DetailTotal = msg.summary.Total
-	if msg.summary.Meta.Type == "string" ||
+		m.DetailTotal = msg.summary.Total
+		if msg.summary.Meta.Type == "string" ||
 			msg.summary.Total <= 0 ||
 			int(msg.summary.Total) <= detailChunkSize {
 			m.DetailLoaded = int(detailTotalOrZero(m.DetailTotal, msg.summary.Meta.Type))
@@ -207,7 +207,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.Loading = true
 			return m, loadKeyDetailFn(m.Client, msg.summary.Meta.Key, -1, 0, m.detailGen, false)
 		}
-	m.DetailLoaded = 0
+		m.DetailLoaded = 0
 		m.detailChunkPending = false
 		m.Loading = true
 		return m, loadKeyDetailFn(m.Client, msg.summary.Meta.Key, 0, detailChunkSize, m.detailGen, false)
@@ -546,7 +546,7 @@ func (m *Model) jumpToDetailSearchMatch(idxInMatches int) {
 		}
 		visible := max(1, m.browserContentHeight()-4)
 		maxW := max(8, panelW-4)
-		chunkIdx := pos / maxW
+		chunkIdx, _ := chunkPositionForByteOffset(d.String, maxW, pos)
 		bodyVisible := max(1, visible-1)
 		limit := stringDetailScrollLimit(d.String, panelW, visible)
 		target := chunkIdx - bodyVisible/2
@@ -1318,10 +1318,10 @@ func stringDetailScrollLimit(value string, panelW, listH int) int {
 
 const (
 	copiedToClipboardStatus = "copied to clipboard"
-	statusMessageDuration  = 3 * time.Second
-	detailDebounceDuration = 80 * time.Millisecond
-	detailChunkSize        = 200
-	detailChunkLookahead   = 50
+	statusMessageDuration   = 3 * time.Second
+	detailDebounceDuration  = 80 * time.Millisecond
+	detailChunkSize         = 200
+	detailChunkLookahead    = 50
 )
 
 func (m *Model) statusClearCmd(msg string) tea.Cmd {
