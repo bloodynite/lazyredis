@@ -78,11 +78,30 @@ func TestParseTTLInput(t *testing.T) {
 }
 
 func TestFormatTTL(t *testing.T) {
-	if FormatTTL(-2*time.Second) != "does not exist" {
-		t.Fatal("expected does not exist")
+	tests := []struct {
+		name string
+		in   time.Duration
+		want string
+	}{
+		{"no expiry sentinel", -1 * time.Second, "infinito"},
+		{"missing key sentinel", -2 * time.Second, "no existe"},
+		{"zero", 0, "0"},
+		{"seconds only", 7 * time.Second, "7seg"},
+		{"minutes and seconds", 3*time.Minute + 5*time.Second, "3min 5seg"},
+		{"hours minutes seconds", 455*time.Hour + 21*time.Minute + 57*time.Second, "18 dias 23h 21min 57seg"},
+		{"days hours minutes seconds", 2*24*time.Hour + 3*time.Hour + 4*time.Minute + 5*time.Second, "2 dias 3h 4min 5seg"},
+		{"one month one day", 31 * 24 * time.Hour, "1 mes 1 dia"},
+		{"years months days", 400 * 24 * time.Hour, "1 anio 1 mes 5 dias"},
+		{"one year boundary", 365 * 24 * time.Hour, "1 anio"},
+		{"sub second rounds to zero", 400 * time.Millisecond, "0"},
 	}
-	if FormatTTL(-1*time.Second) != "no expiry" {
-		t.Fatal("expected no expiry")
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := FormatTTL(tt.in)
+			if got != tt.want {
+				t.Fatalf("FormatTTL(%v) = %q, want %q", tt.in, got, tt.want)
+			}
+		})
 	}
 }
 

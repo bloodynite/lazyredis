@@ -847,14 +847,51 @@ func (c *Client) FlushDB(ctx context.Context) error {
 func FormatTTL(ttl time.Duration) string {
 	switch {
 	case ttl == -2*time.Second:
-		return "does not exist"
+		return "no existe"
 	case ttl == -1*time.Second:
-		return "no expiry"
+		return "infinito"
 	case ttl == 0:
-		return "0s"
+		return "0"
 	default:
-		return ttl.Round(time.Second).String()
+		return formatDecomposedTTL(ttl)
 	}
+}
+
+func formatDecomposedTTL(ttl time.Duration) string {
+	total := int64(ttl.Round(time.Second) / time.Second)
+	if total <= 0 {
+		return "0"
+	}
+	units := []struct {
+		size       int64
+		singular   string
+		plural     string
+		invariable string
+	}{
+		{365 * 24 * 3600, "anio", "anios", ""},
+		{30 * 24 * 3600, "mes", "meses", ""},
+		{24 * 3600, "dia", "dias", ""},
+		{3600, "", "", "h"},
+		{60, "", "", "min"},
+		{1, "", "", "seg"},
+	}
+	parts := make([]string, 0, len(units))
+	for _, u := range units {
+		if total < u.size {
+			continue
+		}
+		n := total / u.size
+		total %= u.size
+		switch {
+		case u.invariable != "":
+			parts = append(parts, strconv.FormatInt(n, 10)+u.invariable)
+		case n == 1:
+			parts = append(parts, "1 "+u.singular)
+		default:
+			parts = append(parts, strconv.FormatInt(n, 10)+" "+u.plural)
+		}
+	}
+	return strings.Join(parts, " ")
 }
 
 func ParseTTLInput(s string) (time.Duration, error) {
