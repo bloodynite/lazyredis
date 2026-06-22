@@ -225,7 +225,11 @@ func (m *Model) renderBrowserPanels() string {
 	}
 
 	left := renderTitledPanel(leftStyle, leftW, height, "Keys", m.renderKeysPanel(leftW-panelChromeCols, height))
-	right := renderTitledPanel(rightStyle, rightW, height, "Detail", m.renderDetailPanel(rightW-panelChromeCols, height))
+	detailTitle := "Detail"
+	if m.SelectedKey != "" {
+		detailTitle = truncate(m.SelectedKey, rightW-panelChromeCols-4)
+	}
+	right := renderTitledPanel(rightStyle, rightW, height, detailTitle, m.renderDetailPanel(rightW-panelChromeCols, height))
 	return lipgloss.JoinHorizontal(lipgloss.Top, left, right)
 }
 
@@ -299,21 +303,19 @@ func (m *Model) renderKeysPanel(panelW, height int) string {
 	const titleRows = 1
 	const metaRows = 1
 
-	title := panelTitleStyle.Render("Keys")
 	pattern := m.ScanPattern
 	if pattern == "" {
 		pattern = "*"
 	}
-	if m.SearchFocus {
-		m.SearchInput.Width = max(4, panelW-6)
-		title += "  " + m.SearchInput.View()
-	} else {
-		title += "  " + helpStyle.Render(pattern)
-	}
 
 	listH := max(1, height-titleRows-metaRows)
 	var lines []string
-	lines = append(lines, title)
+	if m.SearchFocus {
+		m.SearchInput.Width = max(4, panelW-6)
+		lines = append(lines, m.SearchInput.View())
+	} else {
+		lines = append(lines, helpStyle.Render("  "+pattern))
+	}
 
 	var contentLines []string
 	if len(m.VisibleNodes) == 0 {
@@ -393,13 +395,7 @@ func (m *Model) keysPanelMeta() string {
 }
 
 func (m *Model) renderDetailPanel(panelW, height int) string {
-	title := panelTitleStyle.Render("Detail")
-	if m.SelectedKey != "" {
-		title = panelTitleStyle.Render(truncate(m.SelectedKey, panelW-4))
-	}
-
 	var lines []string
-	lines = append(lines, title)
 	if m.KeyDetail == nil {
 		if m.Loading && m.SelectedKey != "" {
 			lines = append(lines, normalStyle.Render("  loading…"))

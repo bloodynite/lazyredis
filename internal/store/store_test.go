@@ -26,6 +26,25 @@ func TestNormalizeScanPattern(t *testing.T) {
 	}
 }
 
+func TestCaseInsensitivePattern(t *testing.T) {
+	tests := []struct {
+		in   string
+		want string
+	}{
+		{in: "*", want: "*"},
+		{in: "*demo*", want: "*[dD][eE][mM][oO]*"},
+		{in: "user:*", want: "[uU][sS][eE][rR]:*"},
+		{in: "key?", want: "[kK][eE][yY]?"},
+		{in: "*016*", want: "*016*"},
+		{in: "[abc]", want: "[abc]"},
+	}
+	for _, tt := range tests {
+		if got := CaseInsensitivePattern(tt.in); got != tt.want {
+			t.Fatalf("CaseInsensitivePattern(%q) = %q, want %q", tt.in, got, tt.want)
+		}
+	}
+}
+
 func TestParseTTLInput(t *testing.T) {
 	tests := []struct {
 		name    string

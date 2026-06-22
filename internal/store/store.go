@@ -193,9 +193,39 @@ func NormalizeScanPattern(input string) string {
 	return "*" + pattern + "*"
 }
 
+func CaseInsensitivePattern(pattern string) string {
+	var out strings.Builder
+	inClass := false
+	for _, r := range pattern {
+		switch {
+		case r == '[':
+			inClass = true
+			out.WriteRune(r)
+		case r == ']':
+			inClass = false
+			out.WriteRune(r)
+		case inClass || r == '*' || r == '?':
+			out.WriteRune(r)
+		case r >= 'A' && r <= 'Z':
+			out.WriteRune('[')
+			out.WriteRune(r + 32)
+			out.WriteRune(r)
+			out.WriteRune(']')
+		case r >= 'a' && r <= 'z':
+			out.WriteRune('[')
+			out.WriteRune(r)
+			out.WriteRune(r - 32)
+			out.WriteRune(']')
+		default:
+			out.WriteRune(r)
+		}
+	}
+	return out.String()
+}
+
 func (c *Client) ScanKeys(ctx context.Context, cursor uint64, pattern string, count int64) ([]string, uint64, error) {
 	pattern = NormalizeScanPattern(pattern)
-	return c.rdb.Scan(ctx, cursor, pattern, count).Result()
+	return c.rdb.Scan(ctx, cursor, CaseInsensitivePattern(pattern), count).Result()
 }
 
 func (c *Client) KeyMeta(ctx context.Context, key string) (*KeyMeta, error) {
