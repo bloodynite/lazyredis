@@ -6,6 +6,7 @@ import (
 	"runtime/debug"
 
 	"github.com/charmbracelet/lipgloss"
+	"github.com/mattn/go-runewidth"
 	"github.com/bloodynite/lazyredis/internal/config"
 	"github.com/bloodynite/lazyredis/internal/store"
 )
@@ -1021,6 +1022,13 @@ func chunkString(s string, size int) []string {
 	return out
 }
 
+// truncate shortens s to at most n display columns, replacing any chars
+// beyond the limit with a trailing ellipsis. The naive implementation
+// (lipgloss.Width of the full string + per-rune Width calls in a loop)
+// ran O(n^2) over multi-KB hash field values, blocking View() for seconds
+// per render and freezing the UI on Ctrl+C. The fast version walks the
+// rune slice once, accumulating width and stopping at the first run that
+// would exceed n-1 (leaving room for the ellipsis).
 func truncate(s string, n int) string {
 	if n <= 3 {
 		return s
@@ -1029,8 +1037,14 @@ func truncate(s string, n int) string {
 		return s
 	}
 	runes := []rune(s)
-	for len(runes) > 0 && lipgloss.Width(string(runes)) > n-1 {
-		runes = runes[:len(runes)-1]
+	budget := n - 1
+	width := 0
+	for i, r := range runes {
+		w := runewidth.RuneWidth(r)
+		if width+w > budget {
+			return string(runes[:i]) + "…"
+		}
+		width += w
 	}
-	return string(runes) + "…"
+	return s
 }
