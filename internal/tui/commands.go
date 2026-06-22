@@ -39,11 +39,25 @@ type keyDetailMsg struct {
 	err    error
 	key    string
 	gen    uint64
+	// chunk indicates this response is a partial window for the current
+	// selection rather than a full reload. The handler appends to the
+	// existing KeyDetail when chunk=true and offset/limit match the
+	// loaded count. appendOffset lets the consumer verify ordering.
+	chunk       bool
+	appendOff   int
+	appendLimit int
 }
 
 type detailDebounceMsg struct {
 	key string
 	gen uint64
+}
+
+type keySummaryMsg struct {
+	summary *store.KeySummary
+	err     error
+	key     string
+	gen     uint64
 }
 
 type actionDoneMsg struct {
@@ -119,12 +133,29 @@ func scanKeys(client *store.Client, cursor uint64, pattern string, appendKeys bo
 	}
 }
 
-func loadKeyDetail(client *store.Client, key string, gen uint64) tea.Cmd {
+func loadKeyDetail(client *store.Client, key string, offset, limit int, gen uint64, chunk bool) tea.Cmd {
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
-		detail, err := client.GetKey(ctx, key)
-		return keyDetailMsg{detail: detail, err: err, key: key, gen: gen}
+		detail, err := client.GetKey(ctx, key, offset, limit)
+		return keyDetailMsg{
+			detail:     detail,
+			err:        err,
+			key:        key,
+			gen:        gen,
+			chunk:      chunk,
+			appendOff:  offset,
+			appendLimit: limit,
+		}
+	}
+}
+
+func loadKeySummary(client *store.Client, key string, gen uint64) tea.Cmd {
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		summary, err := client.GetKeySummary(ctx, key)
+		return keySummaryMsg{summary: summary, err: err, key: key, gen: gen}
 	}
 }
 

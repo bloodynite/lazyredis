@@ -172,30 +172,65 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.KeyDetail = nil
 		return m, nil
 
+	case keySummaryMsg:
+		if msg.gen != m.detailGen || msg.key != m.SelectedKey {
+			return m, nil
+		}
+		if msg.err != nil {
+			m.Loading = false
+			m.ErrMsg = msg.err.Error()
+			return m, nil
+		}
+		m.Loading = false
+		m.DetailTotal = msg.summary.Total
+		// Decide whether the first request is a full load or a chunk.
+		// Threshold matches detailChunkSize: anything at or below one chunk
+		// is loaded in a single round-trip; anything larger is paged.
+		if msg.summary.Meta.Type == "string" ||
+			msg.summary.Total <= 0 ||
+			int(msg.summary.Total) <= detailChunkSize {
+			m.DetailLoaded = int(detailTotalOrZero(m.DetailTotal, msg.summary.Meta.Type))
+			m.detailChunkPending = false
+			m.Loading = true
+			return m, loadKeyDetail(m.Client, msg.summary.Meta.Key, -1, 0, m.detailGen, false)
+		}
+		// Paginated: load the first chunk.
+		m.DetailLoaded = 0
+		m.detailChunkPending = false
+		m.Loading = true
+		return m, loadKeyDetail(m.Client, msg.summary.Meta.Key, 0, detailChunkSize, m.detailGen, false)
+
 	case keyDetailMsg:
 		if msg.gen != m.detailGen || msg.key != m.SelectedKey {
 			return m, nil
 		}
-		m.Loading = false
 		if msg.err != nil {
+			m.Loading = false
+			m.detailChunkPending = false
 			m.ErrMsg = msg.err.Error()
 			return m, nil
 		}
-		// Capture the active detail-search match index before replacing the
-		// underlying detail. When the same key refreshes (auto-refresh) we
-		// keep the user on their current match; only a key change resets to
-		// the first match.
-		prevCursor := m.DetailSearchCursor
-		sameKey := m.KeyDetail != nil &&
-			m.KeyDetail.Meta.Key == msg.detail.Meta.Key
-		m.KeyDetail = msg.detail
-		m.DetailCursor = 0
-		m.DetailScroll = 0
-		m.DetailSearchFocus = false
-		m.DetailSearchInput.Blur()
-		if m.DetailSearchInput.Value() != "" {
-			m.applyDetailSearch(prevCursor, sameKey)
+		m.Loading = false
+		m.detailChunkPending = false
+		if !msg.chunk {
+			// Full reload (first fetch after summary, or refresh).
+			prevCursor := m.DetailSearchCursor
+			sameKey := m.KeyDetail != nil &&
+				m.KeyDetail.Meta.Key == msg.detail.Meta.Key
+			m.KeyDetail = msg.detail
+			m.DetailCursor = 0
+			m.DetailScroll = 0
+			m.DetailSearchFocus = false
+			m.DetailSearchInput.Blur()
+			m.DetailLoaded = compositeLoadedCount(msg.detail)
+			if m.DetailSearchInput.Value() != "" {
+				m.applyDetailSearch(prevCursor, sameKey)
+			}
+			return m, nil
 		}
+		// Append chunk onto the existing detail slice for the matching type.
+		mergeChunkIntoDetail(m.KeyDetail, msg.detail, msg.appendOff)
+		m.DetailLoaded = compositeLoadedCount(m.KeyDetail)
 		return m, nil
 
 	case detailDebounceMsg:
@@ -206,7 +241,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		m.Loading = true
-		return m, loadKeyDetail(m.Client, msg.key, msg.gen)
+		return m, loadKeySummary(m.Client, msg.key, msg.gen)
 
 	case actionDoneMsg:
 		m.Loading = false

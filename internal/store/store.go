@@ -35,6 +35,16 @@ type KeyMeta struct {
 	TTL  time.Duration
 }
 
+// KeySummary is the metadata-only view of a key, fetched in a single
+// pipeline so the UI can show type/ttl and decide whether to fetch the
+// full value lazily. For composite types Total is the O(1) length
+// (HLEN/LLEN/SCARD/ZCARD/XLEN); for strings Total is STRLEN. Total is
+// -1 if the type does not expose a length or the lookup failed.
+type KeySummary struct {
+	Meta  KeyMeta
+	Total int64
+}
+
 type KeyDetail struct {
 	Meta   KeyMeta
 	String string
@@ -212,12 +222,19 @@ func (c *Client) KeyMeta(ctx context.Context, key string) (*KeyMeta, error) {
 	return &KeyMeta{Key: key, Type: t, TTL: ttl}, nil
 }
 
-func (c *Client) GetKey(ctx context.Context, key string) (*KeyDetail, error) {
+// GetKey returns the key detail. offset and limit control the entry
+// window for composite types (hash/list/set/zset/stream). offset < 0 or
+// limit <= 0 means "load everything" (legacy full-load behaviour). The
+// returned KeyDetail only contains the requested window; combine with
+// GetKeySummary to learn the total length without paying for a full
+// fetch.
+func (c *Client) GetKey(ctx context.Context, key string, offset, limit int) (*KeyDetail, error) {
 	meta, err := c.KeyMeta(ctx, key)
 	if err != nil {
 		return nil, err
 	}
 	d := &KeyDetail{Meta: *meta}
+	full := offset < 0 || limit <= 0
 	switch meta.Type {
 	case "string":
 		val, err := c.rdb.Get(ctx, key).Result()
@@ -226,46 +243,192 @@ func (c *Client) GetKey(ctx context.Context, key string) (*KeyDetail, error) {
 		}
 		d.String = val
 	case "hash":
-		val, err := c.rdb.HGetAll(ctx, key).Result()
-		if err != nil {
-			return nil, err
-		}
-		d.Hash = val
+		d.Hash = c.loadHashWindow(ctx, key, offset, limit, full)
 	case "list":
-		val, err := c.rdb.LRange(ctx, key, 0, -1).Result()
+		var stop int64 = -1
+		if !full {
+			stop = int64(offset + limit - 1)
+		}
+		val, err := c.rdb.LRange(ctx, key, int64(offset), stop).Result()
 		if err != nil {
 			return nil, err
 		}
 		d.List = val
 	case "set":
-		val, err := c.rdb.SMembers(ctx, key).Result()
-		if err != nil {
-			return nil, err
-		}
-		d.Set = val
+		d.Set = c.loadSetWindow(ctx, key, offset, limit, full)
 	case "zset":
-		val, err := c.rdb.ZRangeWithScores(ctx, key, 0, -1).Result()
+		var stop int64 = -1
+		if !full {
+			stop = int64(offset + limit - 1)
+		}
+		val, err := c.rdb.ZRangeWithScores(ctx, key, int64(offset), stop).Result()
 		if err != nil {
 			return nil, err
 		}
 		d.ZSet = val
 	case "stream":
-		msgs, err := c.rdb.XRange(ctx, key, "-", "+").Result()
-		if err != nil {
-			return nil, err
-		}
-		d.Stream = make([]StreamEntry, 0, len(msgs))
-		for _, msg := range msgs {
-			fields := make(map[string]string, len(msg.Values))
-			for k, v := range msg.Values {
-				fields[k] = fmt.Sprint(v)
-			}
-			d.Stream = append(d.Stream, StreamEntry{ID: msg.ID, Fields: fields})
-		}
+		d.Stream = c.loadStreamWindow(ctx, key, offset, limit, full)
 	default:
 		return nil, fmt.Errorf("unsupported type %s", meta.Type)
 	}
 	return d, nil
+}
+
+// GetKeySummary returns type, TTL, and O(1) length for the key in a
+// single pipeline. Callers can show metadata immediately and decide
+// whether to fetch the full value lazily based on Total.
+func (c *Client) GetKeySummary(ctx context.Context, key string) (*KeySummary, error) {
+	pipe := c.rdb.Pipeline()
+	typeCmd := pipe.Type(ctx, key)
+	ttlCmd := pipe.TTL(ctx, key)
+	// Issue a length command for every supported type. The one matching
+	// TYPE returns a meaningful count; the rest return 0. This avoids a
+	// TYPE round-trip and a second round-trip for the length command.
+	hashLenCmd := pipe.HLen(ctx, key)
+	listLenCmd := pipe.LLen(ctx, key)
+	setLenCmd := pipe.SCard(ctx, key)
+	zsetLenCmd := pipe.ZCard(ctx, key)
+	streamLenCmd := pipe.XLen(ctx, key)
+	strLenCmd := pipe.StrLen(ctx, key)
+	if _, err := pipe.Exec(ctx); err != nil && err != redis.Nil {
+		return nil, err
+	}
+	t, err := typeCmd.Result()
+	if err != nil {
+		return nil, err
+	}
+	if t == "none" {
+		return nil, fmt.Errorf("key not found")
+	}
+	ttl, err := ttlCmd.Result()
+	if err != nil {
+		return nil, err
+	}
+	total := int64(-1)
+	switch t {
+	case "string":
+		if v, err := strLenCmd.Result(); err == nil {
+			total = v
+		}
+	case "hash":
+		if v, err := hashLenCmd.Result(); err == nil {
+			total = v
+		}
+	case "list":
+		if v, err := listLenCmd.Result(); err == nil {
+			total = v
+		}
+	case "set":
+		if v, err := setLenCmd.Result(); err == nil {
+			total = v
+		}
+	case "zset":
+		if v, err := zsetLenCmd.Result(); err == nil {
+			total = v
+		}
+	case "stream":
+		if v, err := streamLenCmd.Result(); err == nil {
+			total = v
+		}
+	}
+	return &KeySummary{Meta: KeyMeta{Key: key, Type: t, TTL: ttl}, Total: total}, nil
+}
+
+// loadHashWindow returns hash entries for the requested window. Full
+// mode uses HGETALL. Paged mode walks HSCAN cursors until it has the
+// requested window. The field order is whatever HSCAN yields.
+func (c *Client) loadHashWindow(ctx context.Context, key string, offset, limit int, full bool) map[string]string {
+	if full {
+		v, err := c.rdb.HGetAll(ctx, key).Result()
+		if err != nil {
+			return nil
+		}
+		return v
+	}
+	out := make(map[string]string, limit)
+	var cursor uint64
+	seen := 0
+	for {
+		batch, next, err := c.rdb.HScan(ctx, key, cursor, "", int64(limit)).Result()
+		if err != nil {
+			return out
+		}
+		for i := 0; i+1 < len(batch); i += 2 {
+			if seen >= offset {
+				out[batch[i]] = batch[i+1]
+				if len(out) >= limit {
+					return out
+				}
+			}
+			seen++
+		}
+		if next == 0 {
+			return out
+		}
+		cursor = next
+	}
+}
+
+// loadSetWindow returns set members for the requested window via SSCAN.
+// The order is whatever SSCAN yields.
+func (c *Client) loadSetWindow(ctx context.Context, key string, offset, limit int, full bool) []string {
+	if full {
+		v, err := c.rdb.SMembers(ctx, key).Result()
+		if err != nil {
+			return nil
+		}
+		return v
+	}
+	out := make([]string, 0, limit)
+	var cursor uint64
+	seen := 0
+	for {
+		batch, next, err := c.rdb.SScan(ctx, key, cursor, "", int64(limit)).Result()
+		if err != nil {
+			return out
+		}
+		for _, m := range batch {
+			if seen >= offset {
+				out = append(out, m)
+				if len(out) >= limit {
+					return out
+				}
+			}
+			seen++
+		}
+		if next == 0 {
+			return out
+		}
+		cursor = next
+	}
+}
+
+// loadStreamWindow returns stream entries for the requested window,
+// ordered by ID ascending. XRangeN with COUNT paginates directly.
+func (c *Client) loadStreamWindow(ctx context.Context, key string, offset, limit int, full bool) []StreamEntry {
+	count := int64(0)
+	if !full {
+		count = int64(limit)
+	}
+	msgs, err := c.rdb.XRangeN(ctx, key, "-", "+", count).Result()
+	if err != nil {
+		return nil
+	}
+	if !full && offset > 0 {
+		if offset >= len(msgs) {
+			return []StreamEntry{}
+		}
+		msgs = msgs[offset:]
+	}
+	out := make([]StreamEntry, 0, len(msgs))
+	for _, msg := range msgs {
+		fields := make(map[string]string, len(msg.Values))
+		for k, v := range msg.Values {
+			fields[k] = fmt.Sprint(v)
+		}
+		out = append(out, StreamEntry{ID: msg.ID, Fields: fields})
+	}
+	return out
 }
 
 func (c *Client) SetString(ctx context.Context, key, value string, ttl time.Duration) error {

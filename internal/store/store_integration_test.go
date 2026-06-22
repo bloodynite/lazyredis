@@ -38,7 +38,7 @@ func TestIntegrationRedisCRUD(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = client.DeleteKey(ctx, key) })
 
-	detail, err := client.GetKey(ctx, key)
+	detail, err := client.GetKey(ctx, key, -1, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -52,7 +52,7 @@ func TestIntegrationRedisCRUD(t *testing.T) {
 	if err := client.SetString(ctx, key, "updated", 30*time.Second); err != nil {
 		t.Fatal(err)
 	}
-	detail, err = client.GetKey(ctx, key)
+	detail, err = client.GetKey(ctx, key, -1, 0)
 	if err != nil {
 		t.Fatal(err)
 	}

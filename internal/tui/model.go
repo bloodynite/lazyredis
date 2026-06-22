@@ -87,6 +87,14 @@ type Model struct {
 	DetailCursor int
 	DetailScroll int
 	detailGen    uint64
+	// DetailTotal is the O(1) length reported by the Redis summary for
+	// the selected composite key (-1 for strings and unknown types).
+	// DetailLoaded is how many entries of DetailTotal are currently in
+	// m.KeyDetail. The UI silently loads the next chunk when the user
+	// scrolls toward the end.
+	DetailTotal         int64
+	DetailLoaded        int
+	detailChunkPending  bool
 
 	refreshGen uint64
 
