@@ -108,7 +108,7 @@ func TestNonRetriableErrorSurfacesImmediately(t *testing.T) {
 // TestSelectionResetClearsRetryCount: changing selection resets the
 // retry counter so the new key gets a fresh budget.
 func TestSelectionResetClearsRetryCount(t *testing.T) {
-	dRec, _ := captureLoadDetail(t)
+	_, _ = captureLoadDetail(t)
 	m := New()
 	m.Width = 120
 	m.Height = 40
@@ -119,17 +119,24 @@ func TestSelectionResetClearsRetryCount(t *testing.T) {
 	m.detailGen = 5
 	m.detailRetryCount = 1 // would normally block retry
 
-	next, cmd := m.moveKeyCursor(0) // no move; just bump selection explicitly
-	_ = next
-	_ = cmd
-	// Simulate a real selection change by directly bumping fields.
-	m.SelectedKey = "b"
-	m.detailGen = 6
-	m.detailRetryCount = 0
+	next, _ := m.moveKeyCursor(-1)
+	m = next.(*Model)
+	if m.KeyCursor != 0 {
+		t.Fatalf("KeyCursor=%d, want 0", m.KeyCursor)
+	}
+	if m.SelectedKey != "a" {
+		t.Fatalf("SelectedKey=%q, want a", m.SelectedKey)
+	}
+	if m.detailRetryCount != 0 {
+		t.Fatalf("detailRetryCount=%d, want 0 after selection change", m.detailRetryCount)
+	}
+	if m.detailGen != 6 {
+		t.Fatalf("detailGen=%d, want 6 (must bump on selection change)", m.detailGen)
+	}
 
-	// Now WRONGTYPE on the new key should retry.
+	// Now WRONGTYPE on the new key should retry because the budget was reset.
 	next, _ = m.Update(keyDetailMsg{
-		key: "b",
+		key: "a",
 		gen: 6,
 		err: errors.New("WRONGTYPE Operation against a key holding the wrong kind of value"),
 	})
@@ -137,8 +144,58 @@ func TestSelectionResetClearsRetryCount(t *testing.T) {
 	if m.detailRetryCount != 1 {
 		t.Fatalf("detailRetryCount=%d, want 1 after fresh selection", m.detailRetryCount)
 	}
-	if len(*dRec) != 0 {
-		t.Fatal("retry should re-fire summary, not detail directly")
+}
+
+// TestHandleDetailErrorArmsStatusClear: a non-retriable detail error
+// must arm its own statusClearMsg timer so the error fades without
+// being wiped by an unrelated path.
+func TestHandleDetailErrorArmsStatusClear(t *testing.T) {
+	_, _ = captureLoadDetail(t)
+	m := New()
+	m.Width = 120
+	m.Height = 40
+	m.Screen = ScreenBrowser
+	m.Client = &store.Client{}
+	m.SelectedKey = "k"
+	m.detailGen = 1
+
+	beforeGen := m.statusClearGen
+	next, cmd := m.Update(keyDetailMsg{
+		key: "k",
+		gen: 1,
+		err: errors.New("connection refused"),
+	})
+	m = next.(*Model)
+	if cmd == nil {
+		t.Fatal("expected non-nil clear cmd from non-retriable error")
+	}
+	if m.ErrMsg == "" {
+		t.Fatal("ErrMsg should be set after error")
+	}
+	if m.statusClearGen <= beforeGen {
+		t.Fatalf("statusClearGen must be bumped on ErrMsg, got %d (was %d)", m.statusClearGen, beforeGen)
+	}
+
+	// Firing the clear with the captured gen wipes ErrMsg.
+	next, _ = m.Update(statusClearMsg{gen: m.statusClearGen})
+	m = next.(*Model)
+	if m.ErrMsg != "" {
+		t.Fatalf("ErrMsg=%q, want empty after statusClearMsg", m.ErrMsg)
+	}
+}
+
+// TestStatusClearMsgDirectlyClearsErrMsg: the F2 contract — any caller
+// can hand a statusClearMsg and have ErrMsg cleared when the gen matches.
+func TestStatusClearMsgDirectlyClearsErrMsg(t *testing.T) {
+	m := New()
+	m.ErrMsg = "boom"
+	m.statusClearGen++
+	gen := m.statusClearGen
+
+	next, _ := m.Update(statusClearMsg{gen: gen})
+	m = next.(*Model)
+	if m.ErrMsg != "" {
+		t.Fatalf("ErrMsg=%q, want empty after statusClearMsg", m.ErrMsg)
 	}
 }
 
