@@ -45,6 +45,7 @@ const (
 	actionBrowserFilterCancel       = "browser.filter_cancel"
 	actionBrowserDetailSearchNext   = "browser.detail_search_next"
 	actionBrowserDetailSearchPrev   = "browser.detail_search_prev"
+	actionBrowserSortOrder          = "browser.sort_order"
 
 	actionEditEsc      = "edit.esc"
 	actionEditTab      = "edit.tab"
@@ -119,6 +120,7 @@ var defaultKeyMap = map[string][]string{
 	actionBrowserFilterCancel:     {"esc"},
 	actionBrowserDetailSearchNext: {"n"},
 	actionBrowserDetailSearchPrev: {"N"},
+	actionBrowserSortOrder:        {"o"},
 
 	actionEditEsc:      {"esc"},
 	actionEditTab:      {"tab"},
@@ -392,6 +394,7 @@ func (m *Model) browserCommonDefs() []bindDef {
 func (m *Model) browserKeysDefs() []bindDef {
 	defs := []bindDef{
 		{actionBrowserFilter, "filter", scopeBrowserKeys},
+		{actionBrowserSortOrder, "sort order", scopeBrowserKeys},
 		{actionBrowserNewKey, "new key", scopeBrowserKeys},
 		{actionBrowserRefresh, "refresh", scopeBrowserKeys},
 		{actionBrowserAutoRefresh, "auto refresh", scopeBrowserKeys},

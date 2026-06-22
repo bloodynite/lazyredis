@@ -353,18 +353,34 @@ func (m *Model) renderKeysPanel(panelW, height int) string {
 }
 
 func (m *Model) keysPanelMeta() string {
+	indicator := m.sortOrderIndicator()
 	loaded := len(m.Keys)
 	if loaded == 0 && m.ScanCursor == 0 {
+		if indicator != "" {
+			return fmt.Sprintf("0 keys · %s", indicator)
+		}
 		return "0 keys"
 	}
 	if m.ScanCursor != 0 {
 		if m.ScanPattern == "*" && m.Info != nil && m.Info.TotalKeys > int64(loaded) {
+			if indicator != "" {
+				return fmt.Sprintf("%d/%d · g · %s", loaded, m.Info.TotalKeys, indicator)
+			}
 			return fmt.Sprintf("%d/%d · g", loaded, m.Info.TotalKeys)
+		}
+		if indicator != "" {
+			return fmt.Sprintf("%d · g · %s", loaded, indicator)
 		}
 		return fmt.Sprintf("%d · g", loaded)
 	}
 	if m.ScanPattern == "*" && m.Info != nil {
+		if indicator != "" {
+			return fmt.Sprintf("%d/%d keys · %s", loaded, m.Info.TotalKeys, indicator)
+		}
 		return fmt.Sprintf("%d/%d keys", loaded, m.Info.TotalKeys)
+	}
+	if indicator != "" {
+		return fmt.Sprintf("%d keys loaded · %s", loaded, indicator)
 	}
 	return fmt.Sprintf("%d keys loaded", loaded)
 }

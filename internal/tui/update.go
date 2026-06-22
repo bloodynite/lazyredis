@@ -150,9 +150,11 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.ScanCursor = msg.cursor
 		if msg.append {
 			m.Keys = append(m.Keys, msg.keys...)
+			m.sortKeys()
 			return m, nil
 		}
 		m.Keys = msg.keys
+		m.sortKeys()
 		cursor := 0
 		foundSelected := false
 		if m.SelectedKey != "" {
@@ -730,6 +732,10 @@ func (m *Model) handleBrowserKeys(key string, msg tea.KeyMsg) (tea.Model, tea.Cm
 		m.EditInput.Focus()
 		m.PrevScreen = ScreenBrowser
 		m.Screen = ScreenKeyEdit
+	case m.matchAction(actionBrowserSortOrder, key):
+		m.SortOrder = (m.SortOrder + 1) % 3
+		m.sortKeys()
+		return m, m.statusClearCmd(m.sortOrderLabel())
 	case m.matchAction(actionBrowserEdit, key) || m.matchAction(actionBrowserDetailEdit, key):
 		if m.PanelFocus == panelDetail && m.KeyDetail != nil {
 			return m.startDetailEdit()
@@ -1742,4 +1748,37 @@ func (m *Model) refreshDataCmd() []tea.Cmd {
 		cmds = append(cmds, loadKeySummaryFn(m.Client, m.SelectedKey, detailGen))
 	}
 	return cmds
+}
+
+func (m *Model) sortKeys() {
+	switch m.SortOrder {
+	case sortAZ:
+		sort.Slice(m.Keys, func(i, j int) bool {
+			return strings.ToLower(m.Keys[i]) < strings.ToLower(m.Keys[j])
+		})
+	case sortZA:
+		sort.Slice(m.Keys, func(i, j int) bool {
+			return strings.ToLower(m.Keys[i]) > strings.ToLower(m.Keys[j])
+		})
+	}
+}
+
+func (m *Model) sortOrderLabel() string {
+	switch m.SortOrder {
+	case sortAZ:
+		return "sort: A→Z"
+	case sortZA:
+		return "sort: Z→A"
+	default:
+		return "sort: original"
+	}
+}
+
+func (m *Model) sortOrderIndicator() string {
+	switch m.SortOrder {
+	case sortZA:
+		return "Z→A"
+	default:
+		return ""
+	}
 }

@@ -47,6 +47,14 @@ const (
 	editRefreshInterval
 )
 
+type sortOrder int
+
+const (
+	sortAZ sortOrder = iota
+	sortZA
+	sortOriginal
+)
+
 const (
 	newKeyFieldTTL = iota
 	newKeyFieldType
@@ -76,6 +84,7 @@ type Model struct {
 
 	Info        *store.ServerInfo
 	Keys        []string
+	SortOrder   sortOrder
 	ScanCursor  uint64
 	ScanPattern string
 	scanGen     uint64
