@@ -1,8 +1,11 @@
 package store
 
 import (
+	"context"
 	"testing"
 	"time"
+
+	"github.com/bloodynite/lazyredis/internal/config"
 )
 
 func TestNormalizeScanPattern(t *testing.T) {
@@ -113,5 +116,133 @@ func TestParseKeyBodyZSet(t *testing.T) {
 	}
 	if body.ZSet[0].Score != 1.5 {
 		t.Fatalf("score = %v", body.ZSet[0].Score)
+	}
+}
+
+func TestGetKeySummaryAllTypes(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	p := config.Profile{
+		Name: "local-summary-test",
+		Mode: config.ModeStandalone,
+		Addr: "127.0.0.1:6379",
+		DB:   0,
+	}
+	client, err := Connect(ctx, p)
+	if err != nil {
+		t.Skipf("Redis at 127.0.0.1:6379 not reachable: %v", err)
+	}
+	t.Cleanup(func() { _ = client.Close() })
+
+	prefix := "lazyredis:summary:" + time.Now().Format("150405.000000")
+
+	cases := []struct {
+		name    string
+		keyType string
+		total   int64
+		setup   func(t *testing.T, c *Client, key string)
+	}{
+		{
+			name:    "string",
+			keyType: "string",
+			total:   11,
+			setup: func(t *testing.T, c *Client, key string) {
+				t.Helper()
+				if err := c.SetString(ctx, key, "hello world", 30*time.Second); err != nil {
+					t.Fatal(err)
+				}
+			},
+		},
+		{
+			name:    "hash",
+			keyType: "hash",
+			total:   2,
+			setup: func(t *testing.T, c *Client, key string) {
+				t.Helper()
+				if err := c.SetHashField(ctx, key, "f1", "v1"); err != nil {
+					t.Fatal(err)
+				}
+				if err := c.SetHashField(ctx, key, "f2", "v2"); err != nil {
+					t.Fatal(err)
+				}
+			},
+		},
+		{
+			name:    "list",
+			keyType: "list",
+			total:   3,
+			setup: func(t *testing.T, c *Client, key string) {
+				t.Helper()
+				for _, v := range []string{"a", "b", "c"} {
+					if err := c.AppendListItem(ctx, key, v); err != nil {
+						t.Fatal(err)
+					}
+				}
+			},
+		},
+		{
+			name:    "set",
+			keyType: "set",
+			total:   3,
+			setup: func(t *testing.T, c *Client, key string) {
+				t.Helper()
+				for _, m := range []string{"a", "b", "c"} {
+					if err := c.SetAddMember(ctx, key, m); err != nil {
+						t.Fatal(err)
+					}
+				}
+			},
+		},
+		{
+			name:    "zset",
+			keyType: "zset",
+			total:   3,
+			setup: func(t *testing.T, c *Client, key string) {
+				t.Helper()
+				if err := c.ZSetAddMember(ctx, key, 1, "a"); err != nil {
+					t.Fatal(err)
+				}
+				if err := c.ZSetAddMember(ctx, key, 2, "b"); err != nil {
+					t.Fatal(err)
+				}
+				if err := c.ZSetAddMember(ctx, key, 3, "c"); err != nil {
+					t.Fatal(err)
+				}
+			},
+		},
+		{
+			name:    "stream",
+			keyType: "stream",
+			total:   2,
+			setup: func(t *testing.T, c *Client, key string) {
+				t.Helper()
+				if err := c.StreamAddEntry(ctx, key, "*", map[string]string{"f": "1"}); err != nil {
+					t.Fatal(err)
+				}
+				if err := c.StreamAddEntry(ctx, key, "*", map[string]string{"f": "2"}); err != nil {
+					t.Fatal(err)
+				}
+			},
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			key := prefix + ":" + tc.name
+			tc.setup(t, client, key)
+			t.Cleanup(func() { _ = client.DeleteKey(ctx, key) })
+
+			summary, err := client.GetKeySummary(ctx, key)
+			if err != nil {
+				t.Fatalf("GetKeySummary: %v", err)
+			}
+			if summary.Meta.Type != tc.keyType {
+				t.Fatalf("Type = %q, want %q", summary.Meta.Type, tc.keyType)
+			}
+			if summary.Total != tc.total {
+				t.Fatalf("Total = %d, want %d", summary.Total, tc.total)
+			}
+		})
 	}
 }

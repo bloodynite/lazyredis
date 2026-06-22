@@ -102,12 +102,12 @@ func TestStaleAutoRefreshDropped(t *testing.T) {
 	m.Config = &config.File{}
 	m.refreshGen = 7
 
-	// Tick from an older refresh generation must be ignored so previous
-	// timers cannot keep firing after a new schedule.
+	// Tick from an older refresh generation must drop the data refresh
+	// but keep the timer alive so auto-refresh does not silently die.
 	next, cmd := m.Update(autoRefreshMsg{gen: 5})
 	m = next.(*Model)
-	if cmd != nil {
-		t.Fatal("stale auto refresh should not reschedule")
+	if cmd == nil {
+		t.Fatal("stale auto refresh must still reschedule the next tick")
 	}
 	if m.Loading {
 		t.Fatal("stale auto refresh should not trigger refresh")

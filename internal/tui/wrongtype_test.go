@@ -26,9 +26,6 @@ func TestWRONGTYPETriggersSummaryRetry(t *testing.T) {
 		err: errors.New("WRONGTYPE Operation against a key holding the wrong kind of value"),
 	})
 	m = next.(*Model)
-	if !m.detailChunkPending == false {
-		// detailChunkPending stays false; we are going through summary again
-	}
 	if m.detailRetryCount != 1 {
 		t.Fatalf("detailRetryCount=%d, want 1", m.detailRetryCount)
 	}
@@ -55,7 +52,7 @@ func TestWRONGTYPETriggersSummaryRetry(t *testing.T) {
 // TestSecondWRONGTYPESurfacesError: a second WRONGTYPE on the same
 // selection surfaces the error instead of looping forever.
 func TestSecondWRONGTYPESurfacesError(t *testing.T) {
-	_, _ = captureLoadDetail(t)
+	_, sRec := captureLoadDetail(t)
 	m := New()
 	m.Width = 120
 	m.Height = 40
@@ -65,13 +62,13 @@ func TestSecondWRONGTYPESurfacesError(t *testing.T) {
 	m.detailGen = 2
 	m.detailRetryCount = 1 // already retried once
 
-	next, cmd := m.Update(keyDetailMsg{
+	next, _ := m.Update(keyDetailMsg{
 		key: "k",
 		gen: 2,
 		err: errors.New("WRONGTYPE Operation against a key holding the wrong kind of value"),
 	})
 	m = next.(*Model)
-	if cmd != nil {
+	if len(*sRec) != 0 {
 		t.Fatal("second WRONGTYPE must not retry")
 	}
 	if !contains(m.ErrMsg, "WRONGTYPE") {
@@ -94,15 +91,12 @@ func TestNonRetriableErrorSurfacesImmediately(t *testing.T) {
 	m.SelectedKey = "k"
 	m.detailGen = 1
 
-	next, cmd := m.Update(keyDetailMsg{
+	next, _ := m.Update(keyDetailMsg{
 		key: "k",
 		gen: 1,
 		err: errors.New("connection refused"),
 	})
 	m = next.(*Model)
-	if cmd != nil {
-		t.Fatal("non-retriable error must not retry")
-	}
 	if len(*dRec) != 0 || len(*sRec) != 0 {
 		t.Fatal("no further fetches expected")
 	}

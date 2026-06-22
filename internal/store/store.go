@@ -274,60 +274,46 @@ func (c *Client) GetKey(ctx context.Context, key string, offset, limit int) (*Ke
 	return d, nil
 }
 
-// GetKeySummary returns type, TTL, and O(1) length for the key in a
-// single pipeline. Callers can show metadata immediately and decide
-// whether to fetch the full value lazily based on Total.
+// GetKeySummary returns type, TTL, and O(1) length for the key.
+// Callers can show metadata immediately and decide whether to fetch
+// the full value lazily based on Total.
 func (c *Client) GetKeySummary(ctx context.Context, key string) (*KeySummary, error) {
-	pipe := c.rdb.Pipeline()
-	typeCmd := pipe.Type(ctx, key)
-	ttlCmd := pipe.TTL(ctx, key)
-	// Issue a length command for every supported type. The one matching
-	// TYPE returns a meaningful count; the rest return 0. This avoids a
-	// TYPE round-trip and a second round-trip for the length command.
-	hashLenCmd := pipe.HLen(ctx, key)
-	listLenCmd := pipe.LLen(ctx, key)
-	setLenCmd := pipe.SCard(ctx, key)
-	zsetLenCmd := pipe.ZCard(ctx, key)
-	streamLenCmd := pipe.XLen(ctx, key)
-	strLenCmd := pipe.StrLen(ctx, key)
-	if _, err := pipe.Exec(ctx); err != nil && err != redis.Nil {
-		return nil, err
-	}
-	t, err := typeCmd.Result()
+	t, err := c.rdb.Type(ctx, key).Result()
 	if err != nil {
 		return nil, err
 	}
 	if t == "none" {
 		return nil, fmt.Errorf("key not found")
 	}
+
+	pipe := c.rdb.Pipeline()
+	ttlCmd := pipe.TTL(ctx, key)
+	var lenCmd *redis.IntCmd
+	switch t {
+	case "string":
+		lenCmd = pipe.StrLen(ctx, key)
+	case "hash":
+		lenCmd = pipe.HLen(ctx, key)
+	case "list":
+		lenCmd = pipe.LLen(ctx, key)
+	case "set":
+		lenCmd = pipe.SCard(ctx, key)
+	case "zset":
+		lenCmd = pipe.ZCard(ctx, key)
+	case "stream":
+		lenCmd = pipe.XLen(ctx, key)
+	}
+	if _, err := pipe.Exec(ctx); err != nil && err != redis.Nil {
+		return nil, err
+	}
+
 	ttl, err := ttlCmd.Result()
 	if err != nil {
 		return nil, err
 	}
 	total := int64(-1)
-	switch t {
-	case "string":
-		if v, err := strLenCmd.Result(); err == nil {
-			total = v
-		}
-	case "hash":
-		if v, err := hashLenCmd.Result(); err == nil {
-			total = v
-		}
-	case "list":
-		if v, err := listLenCmd.Result(); err == nil {
-			total = v
-		}
-	case "set":
-		if v, err := setLenCmd.Result(); err == nil {
-			total = v
-		}
-	case "zset":
-		if v, err := zsetLenCmd.Result(); err == nil {
-			total = v
-		}
-	case "stream":
-		if v, err := streamLenCmd.Result(); err == nil {
+	if lenCmd != nil {
+		if v, err := lenCmd.Result(); err == nil {
 			total = v
 		}
 	}

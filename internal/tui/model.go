@@ -98,7 +98,8 @@ type Model struct {
 	// detailRetryCount bounds how many times the same selection will
 	// retry after a transient Redis error (most commonly WRONGTYPE
 	// caused by the key changing type between the summary pipeline and
-	// the detail fetch). Reset to 0 on every selection change.
+	// the detail fetch). Reset to 0 on every selection change, every
+	// summary load, and after the error surfaces.
 	detailRetryCount    uint8
 
 	refreshGen uint64

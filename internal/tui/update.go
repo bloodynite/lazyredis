@@ -60,6 +60,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case statusClearMsg:
 		if msg.gen == m.statusClearGen {
 			m.Status = ""
+			m.ErrMsg = ""
 		}
 		return m, nil
 
@@ -67,11 +68,15 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.Loading = false
 		if msg.err != nil {
 			m.ErrMsg = msg.err.Error()
-			return m, nil
+			m.statusClearGen++
+			gen := m.statusClearGen
+			return m, clearStatusAfter(statusMessageDuration, gen)
 		}
 		if msg.cfg == nil {
 			m.ErrMsg = "config not loaded"
-			return m, nil
+			m.statusClearGen++
+			gen := m.statusClearGen
+			return m, clearStatusAfter(statusMessageDuration, gen)
 		}
 		m.Config = msg.cfg
 		m.Profiles = msg.cfg.Profiles
@@ -94,7 +99,9 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.Loading = false
 		if msg.err != nil {
 			m.ErrMsg = msg.err.Error()
-			return m, nil
+			m.statusClearGen++
+			gen := m.statusClearGen
+			return m, clearStatusAfter(statusMessageDuration, gen)
 		}
 		m.Client = msg.client
 		m.ErrMsg = ""
@@ -109,7 +116,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case autoRefreshMsg:
 		if msg.gen != 0 && msg.gen != m.refreshGen {
-			return m, nil
+			return m, m.scheduleAutoRefreshCmd()
 		}
 		cmds := []tea.Cmd{m.scheduleAutoRefreshCmd()}
 		if m.canAutoRefresh() {
@@ -122,7 +129,9 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.Loading = false
 		if msg.err != nil {
 			m.ErrMsg = msg.err.Error()
-			return m, nil
+			m.statusClearGen++
+			gen := m.statusClearGen
+			return m, clearStatusAfter(statusMessageDuration, gen)
 		}
 		m.Info = msg.info
 		return m, nil
@@ -134,7 +143,9 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.Loading = false
 		if msg.err != nil {
 			m.ErrMsg = msg.err.Error()
-			return m, nil
+			m.statusClearGen++
+			gen := m.statusClearGen
+			return m, clearStatusAfter(statusMessageDuration, gen)
 		}
 		m.ScanCursor = msg.cursor
 		if msg.append {
@@ -184,6 +195,9 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, m.handleDetailError(msg.err.Error())
 		}
 		m.Loading = false
+		if m.detailRetryCount > 0 {
+			m.ErrMsg = ""
+		}
 		m.DetailTotal = msg.summary.Total
 		// Decide whether the first request is a full load or a chunk.
 		// Threshold matches detailChunkSize: anything at or below one chunk
@@ -213,6 +227,9 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.Loading = false
 		m.detailChunkPending = false
+		if m.detailRetryCount > 0 {
+			m.ErrMsg = ""
+		}
 		if !msg.chunk {
 			// Full reload (first fetch after summary, or refresh).
 			prevCursor := m.DetailSearchCursor
@@ -248,7 +265,9 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.Loading = false
 		if msg.err != nil {
 			m.ErrMsg = msg.err.Error()
-			return m, nil
+			m.statusClearGen++
+			gen := m.statusClearGen
+			return m, clearStatusAfter(statusMessageDuration, gen)
 		}
 		m.ErrMsg = ""
 		statusCmd := m.statusClearCmd(msg.status)
@@ -814,6 +833,7 @@ func (m *Model) moveKeyCursor(delta int) (tea.Model, tea.Cmd) {
 	m.PanelFocus = panelKeys
 	m.SelectedKey = m.Keys[m.KeyCursor]
 	m.detailGen++
+	m.detailRetryCount = 0
 	m.Loading = true
 	return m, scheduleDetailDebounce(m.SelectedKey, m.detailGen)
 }
@@ -847,7 +867,9 @@ func (m *Model) startEdit() (tea.Model, tea.Cmd) {
 		return m, m.focusNewKeyField(newKeyFieldTTL)
 	default:
 		m.ErrMsg = fmt.Sprintf("type %s is not editable", m.KeyDetail.Meta.Type)
-		return m, nil
+		m.statusClearGen++
+		gen := m.statusClearGen
+		return m, clearStatusAfter(statusMessageDuration, gen)
 	}
 }
 
@@ -860,7 +882,9 @@ func (m *Model) updateEditInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			sec, err := strconv.Atoi(value)
 			if err != nil || sec < 0 {
 				m.ErrMsg = "seconds must be >= 0"
-				return m, nil
+				m.statusClearGen++
+				gen := m.statusClearGen
+				return m, clearStatusAfter(statusMessageDuration, gen)
 			}
 			m.Loading = true
 			return m, saveRefreshInterval(m.Config, sec)
@@ -957,7 +981,9 @@ func (m *Model) submitTTLModal() (tea.Model, tea.Cmd) {
 	ttl, err := store.ParseTTLInput(m.NewKeyTTL.Value())
 	if err != nil {
 		m.ErrMsg = err.Error()
-		return m, nil
+		m.statusClearGen++
+		gen := m.statusClearGen
+		return m, clearStatusAfter(statusMessageDuration, gen)
 	}
 	m.Loading = true
 	return m, setTTL(m.Client, m.SelectedKey, ttl)
@@ -1033,12 +1059,16 @@ func (m *Model) submitKeyForm() (tea.Model, tea.Cmd) {
 	key := strings.TrimSpace(m.NewKeyName.Value())
 	if key == "" {
 		m.ErrMsg = "key required"
-		return m, nil
+		m.statusClearGen++
+		gen := m.statusClearGen
+		return m, clearStatusAfter(statusMessageDuration, gen)
 	}
 	ttl, err := store.ParseTTLInput(m.NewKeyTTL.Value())
 	if err != nil {
 		m.ErrMsg = err.Error()
-		return m, nil
+		m.statusClearGen++
+		gen := m.statusClearGen
+		return m, clearStatusAfter(statusMessageDuration, gen)
 	}
 	renameFrom := ""
 	if m.EditMode == editExistingKey {
@@ -1046,7 +1076,9 @@ func (m *Model) submitKeyForm() (tea.Model, tea.Cmd) {
 		body, err := store.ParseKeyBody(m.KeyFormType, m.NewKeyValue.Value())
 		if err != nil {
 			m.ErrMsg = err.Error()
-			return m, nil
+			m.statusClearGen++
+			gen := m.statusClearGen
+			return m, clearStatusAfter(statusMessageDuration, gen)
 		}
 		m.SelectedKey = key
 		m.Loading = true
@@ -1056,7 +1088,9 @@ func (m *Model) submitKeyForm() (tea.Model, tea.Cmd) {
 	body, err := store.ParseKeyBody(keyType, m.NewKeyValue.Value())
 	if err != nil {
 		m.ErrMsg = err.Error()
-		return m, nil
+		m.statusClearGen++
+		gen := m.statusClearGen
+		return m, clearStatusAfter(statusMessageDuration, gen)
 	}
 	m.KeyFormType = keyType
 	m.SelectedKey = key
@@ -1129,7 +1163,9 @@ func (m *Model) updateFormInputs(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		p, err := profileFromForm(m.FormInputs)
 		if err != nil {
 			m.ErrMsg = err.Error()
-			return m, nil
+			m.statusClearGen++
+			gen := m.statusClearGen
+			return m, clearStatusAfter(statusMessageDuration, gen)
 		}
 		if m.FormEditing && m.Config != nil {
 			if existing, _ := m.Config.Find(m.FormOriginal); existing != nil {
@@ -1269,21 +1305,27 @@ func mergeChunkIntoDetail(dst, src *store.KeyDetail, offset int) {
 func (m *Model) handleDetailError(errMsg string) tea.Cmd {
 	if m.Client == nil || m.SelectedKey == "" {
 		m.ErrMsg = errMsg
-		return nil
+		m.statusClearGen++
+		gen := m.statusClearGen
+		return clearStatusAfter(statusMessageDuration, gen)
 	}
 	if m.detailRetryCount >= 1 || !looksLikeRetriableDetailError(errMsg) {
 		m.ErrMsg = errMsg
 		m.detailRetryCount = 0
-		return nil
+		m.statusClearGen++
+		gen := m.statusClearGen
+		return clearStatusAfter(statusMessageDuration, gen)
 	}
 	m.detailRetryCount++
 	m.ErrMsg = errMsg + " (retrying)"
+	m.statusClearGen++
+	gen := m.statusClearGen
 	m.detailGen++
 	m.detailChunkPending = false
 	m.DetailTotal = -1
 	m.DetailLoaded = 0
 	m.Loading = true
-	return loadKeySummaryFn(m.Client, m.SelectedKey, m.detailGen)
+	return tea.Batch(loadKeySummaryFn(m.Client, m.SelectedKey, m.detailGen), clearStatusAfter(statusMessageDuration, gen))
 }
 
 // WRONGTYPE means a key changed type between the summary TYPE call and
