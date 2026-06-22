@@ -23,6 +23,10 @@ func (m *Model) keyBinds() []keyBind {
 	return binds
 }
 
+var helpOnlyIDs = map[string]struct{}{
+	actionBrowserFlush: {},
+}
+
 func (m *Model) keybarBinds() (main []keyBind, pinned []keyBind) {
 	defs := m.applicableHelpActions()
 	pinnedIDs := map[string]struct{}{}
@@ -55,6 +59,9 @@ func (m *Model) keybarBinds() (main []keyBind, pinned []keyBind) {
 		}
 	}
 	for _, def := range defs {
+		if _, ok := helpOnlyIDs[def.id]; ok {
+			continue
+		}
 		b := m.bindEntry(def.id, def.desc)
 		if _, ok := pinnedIDs[def.id]; ok {
 			pinned = append(pinned, b)

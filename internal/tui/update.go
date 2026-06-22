@@ -14,6 +14,7 @@ import (
 	"github.com/bloodynite/lazyredis/internal/config"
 	"github.com/bloodynite/lazyredis/internal/store"
 	"github.com/charmbracelet/bubbles/spinner"
+	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 )
 
@@ -339,6 +340,9 @@ func (m *Model) inputFocused() bool {
 	if m.Screen == ScreenBrowser && m.DetailSearchFocus {
 		return true
 	}
+	if m.Screen == ScreenConfirm && m.ConfirmAction == confirmFlushDB {
+		return true
+	}
 	return false
 }
 
@@ -368,6 +372,12 @@ func (m *Model) handleInputKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.blurEditInputs()
 			return m, nil
 		}
+	case ScreenConfirm:
+		if m.ConfirmAction == confirmFlushDB && m.matchAction(actionConfirmNo, key) {
+			m.Screen = m.PrevScreen
+			m.ConfirmAction = confirmNone
+			return m, nil
+		}
 	case ScreenBrowser:
 		if m.DetailSearchFocus && m.matchAction(actionBrowserFilterCancel, key) {
 			m.DetailSearchFocus = false
@@ -395,6 +405,25 @@ func (m *Model) handleInputKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m.updateElementTextareaInput(msg)
 		}
 		return m.updateEditInput(msg)
+	case ScreenConfirm:
+		if m.ConfirmAction == confirmFlushDB {
+			var cmd tea.Cmd
+			m.ConfirmInput, cmd = m.ConfirmInput.Update(msg)
+			if m.matchAction(actionBrowserFilterApply, key) {
+				profileName := m.Client.Profile().Name
+				if m.ConfirmInput.Value() == profileName {
+					m.Loading = true
+					m.Screen = ScreenBrowser
+					m.ConfirmAction = confirmNone
+					return m, tea.Batch(cmd, flushDB(m.Client))
+				}
+				m.ErrMsg = "profile name does not match"
+				m.statusClearGen++
+				gen := m.statusClearGen
+				return m, tea.Batch(cmd, clearStatusAfter(statusMessageDuration, gen))
+			}
+			return m, cmd
+		}
 	case ScreenBrowser:
 		if m.DetailSearchFocus {
 			var cmd tea.Cmd
@@ -820,6 +849,9 @@ func (m *Model) handleBrowserKeys(key string, msg tea.KeyMsg) (tea.Model, tea.Cm
 		m.ConfirmTarget = ""
 		m.PrevScreen = ScreenBrowser
 		m.Screen = ScreenConfirm
+		m.ConfirmInput.SetValue("")
+		m.ConfirmInput.Focus()
+		return m, textinput.Blink
 	}
 	return m, nil
 }
@@ -859,12 +891,13 @@ func (m *Model) moveKeyCursor(delta int) (tea.Model, tea.Cmd) {
 func (m *Model) handleConfirmKeys(key string) (tea.Model, tea.Cmd) {
 	switch {
 	case m.matchAction(actionConfirmYes, key):
+		if m.ConfirmAction == confirmFlushDB {
+			return m, nil
+		}
 		m.Loading = true
 		switch m.ConfirmAction {
 		case confirmDeleteKey:
 			return m, deleteKey(m.Client, m.ConfirmTarget)
-		case confirmFlushDB:
-			return m, flushDB(m.Client)
 		case confirmDeleteProfile:
 			return m, deleteProfile(m.Config, m.ConfirmTarget)
 		}

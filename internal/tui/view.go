@@ -813,13 +813,16 @@ func (m *Model) renderConfirmModal() string {
 	case confirmDeleteKey:
 		msg = fmt.Sprintf("Delete key %q?", m.ConfirmTarget)
 	case confirmFlushDB:
-		msg = "Flush the entire current database?"
+		msg = "Flush the entire current database?\nType database name to confirm"
 	case confirmDeleteProfile:
 		msg = fmt.Sprintf("Delete profile %q?", m.ConfirmTarget)
 	}
 	inner := panelTitleStyle.Render("Confirm") + "\n\n" +
-		confirmMsgStyle.Render(msg) + "\n\n" +
-		confirmHintStyle.Render("y yes   n no")
+		confirmMsgStyle.Render(msg) + "\n\n"
+	if m.ConfirmAction == confirmFlushDB {
+		inner += m.ConfirmInput.View() + "\n\n"
+	}
+	inner += confirmHintStyle.Render("y yes   n no")
 	width := min(56, max(36, lipgloss.Width(msg)+6))
 	return confirmModalStyle.Width(width).Render(inner)
 }

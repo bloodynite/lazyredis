@@ -123,6 +123,7 @@ type Model struct {
 
 	ConfirmAction confirmAction
 	ConfirmTarget string
+	ConfirmInput  textinput.Model
 
 	Spinner spinner.Model
 	Loading bool
@@ -172,6 +173,11 @@ func New() *Model {
 	newKeyValue.SetWidth(40)
 	newKeyValue.SetHeight(6)
 
+	confirmInput := textinput.New()
+	confirmInput.Placeholder = "type profile name to confirm"
+	confirmInput.CharLimit = 256
+	confirmInput.Width = 40
+
 	return &Model{
 		Screen:            ScreenProfiles,
 		Spinner:           s,
@@ -182,6 +188,7 @@ func New() *Model {
 		NewKeyTTL:         newKeyTTL,
 		NewKeyName:        newKeyName,
 		NewKeyValue:       newKeyValue,
+		ConfirmInput:      confirmInput,
 		ScanPattern:       "*",
 		refreshGen:        1,
 		ExpandedFolders:   make(map[string]bool),
