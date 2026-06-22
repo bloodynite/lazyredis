@@ -91,6 +91,11 @@ type Model struct {
 	KeyCursor   int
 	KeyScroll   int
 
+	TreeRoot        []*treeNode
+	ExpandedFolders map[string]bool
+	VisibleNodes    []*treeNode
+	SelectedNodePath string
+
 	SelectedKey string
 	KeyDetail   *store.KeyDetail
 	DetailCursor int
@@ -179,6 +184,7 @@ func New() *Model {
 		NewKeyValue:       newKeyValue,
 		ScanPattern:       "*",
 		refreshGen:        1,
+		ExpandedFolders:   make(map[string]bool),
 	}
 }
 

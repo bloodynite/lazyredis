@@ -157,9 +157,9 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.sortKeys()
 		cursor := 0
 		foundSelected := false
-		if m.SelectedKey != "" {
-			for i, k := range m.Keys {
-				if k == m.SelectedKey {
+		if m.SelectedNodePath != "" {
+			for i, node := range m.VisibleNodes {
+				if node.fullPath == m.SelectedNodePath {
 					cursor = i
 					foundSelected = true
 					break
@@ -167,22 +167,26 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 		if !foundSelected {
-			if m.KeyCursor >= len(m.Keys) {
-				cursor = max(0, len(m.Keys)-1)
+			if m.KeyCursor >= len(m.VisibleNodes) {
+				cursor = max(0, len(m.VisibleNodes)-1)
 			} else {
 				cursor = m.KeyCursor
 			}
 		}
 		m.KeyCursor = cursor
 		m.adjustKeyScroll()
-		if len(m.Keys) > 0 {
-			m.SelectedKey = m.Keys[m.KeyCursor]
-			m.detailGen++
-			m.detailRetryCount = 0
-			m.DetailTotal = -1
-			m.DetailLoaded = 0
-			m.Loading = true
-			return m, loadKeySummaryFn(m.Client, m.SelectedKey, m.detailGen)
+		if len(m.VisibleNodes) > 0 {
+			node := m.VisibleNodes[m.KeyCursor]
+			m.SelectedNodePath = node.fullPath
+			if !node.isFolder {
+				m.SelectedKey = node.fullPath
+				m.detailGen++
+				m.detailRetryCount = 0
+				m.DetailTotal = -1
+				m.DetailLoaded = 0
+				m.Loading = true
+				return m, loadKeySummaryFn(m.Client, m.SelectedKey, m.detailGen)
+			}
 		}
 		m.SelectedKey = ""
 		m.KeyDetail = nil
@@ -675,6 +679,50 @@ func (m *Model) handleBrowserKeys(key string, msg tea.KeyMsg) (tea.Model, tea.Cm
 			return m, m.statusClearCmd(m.detailSearchNavStatus())
 		}
 	}
+	if m.PanelFocus == panelKeys && !m.SearchFocus {
+		switch key {
+		case "enter":
+			if len(m.VisibleNodes) > 0 {
+				node := m.VisibleNodes[m.KeyCursor]
+				m.SelectedNodePath = node.fullPath
+				if node.isFolder {
+					m.toggleFolder(m.KeyCursor)
+					m.adjustKeyScroll()
+					return m, nil
+				}
+			}
+		case "right":
+			if len(m.VisibleNodes) > 0 {
+				node := m.VisibleNodes[m.KeyCursor]
+				m.SelectedNodePath = node.fullPath
+				if node.isFolder && !m.ExpandedFolders[node.fullPath] {
+					m.toggleFolder(m.KeyCursor)
+					m.adjustKeyScroll()
+					return m, nil
+				}
+			}
+		case "left":
+			if len(m.VisibleNodes) > 0 {
+				node := m.VisibleNodes[m.KeyCursor]
+				m.SelectedNodePath = node.fullPath
+				if node.isFolder && m.ExpandedFolders[node.fullPath] {
+					m.toggleFolder(m.KeyCursor)
+					m.adjustKeyScroll()
+					return m, nil
+				}
+				if node.depth > 0 {
+					for i := m.KeyCursor - 1; i >= 0; i-- {
+						if m.VisibleNodes[i].depth < node.depth {
+							m.KeyCursor = i
+							m.SelectedNodePath = m.VisibleNodes[i].fullPath
+							m.adjustKeyScroll()
+							return m, nil
+						}
+					}
+				}
+			}
+		}
+	}
 	switch {
 	case m.matchAction(actionBrowserDisconnect, key):
 		if m.Client != nil {
@@ -777,17 +825,31 @@ func (m *Model) handleBrowserKeys(key string, msg tea.KeyMsg) (tea.Model, tea.Cm
 }
 
 func (m *Model) moveKeyCursor(delta int) (tea.Model, tea.Cmd) {
-	if len(m.Keys) == 0 {
+	count := len(m.VisibleNodes)
+	if count == 0 {
+		count = len(m.Keys)
+	}
+	if count == 0 {
 		return m, nil
 	}
-	next := clamp(m.KeyCursor+delta, 0, len(m.Keys)-1)
+	next := clamp(m.KeyCursor+delta, 0, count-1)
 	if next == m.KeyCursor {
 		return m, nil
 	}
 	m.KeyCursor = next
 	m.adjustKeyScroll()
 	m.PanelFocus = panelKeys
-	m.SelectedKey = m.Keys[m.KeyCursor]
+	if len(m.VisibleNodes) > 0 {
+		node := m.VisibleNodes[m.KeyCursor]
+		m.SelectedNodePath = node.fullPath
+		if node.isFolder {
+			return m, nil
+		}
+		m.SelectedKey = node.fullPath
+	} else {
+		m.SelectedKey = m.Keys[m.KeyCursor]
+		m.SelectedNodePath = m.SelectedKey
+	}
 	m.detailGen++
 	m.detailRetryCount = 0
 	m.Loading = true
@@ -1761,6 +1823,25 @@ func (m *Model) sortKeys() {
 			return strings.ToLower(m.Keys[i]) > strings.ToLower(m.Keys[j])
 		})
 	}
+	m.TreeRoot = buildKeyTree(m.Keys, m.SortOrder)
+	m.VisibleNodes = flattenTree(m.TreeRoot, m.ExpandedFolders, 0)
+}
+
+func (m *Model) rebuildTree() {
+	m.TreeRoot = buildKeyTree(m.Keys, m.SortOrder)
+	m.VisibleNodes = flattenTree(m.TreeRoot, m.ExpandedFolders, 0)
+}
+
+func (m *Model) toggleFolder(index int) {
+	if index < 0 || index >= len(m.VisibleNodes) {
+		return
+	}
+	node := m.VisibleNodes[index]
+	if !node.isFolder {
+		return
+	}
+	m.ExpandedFolders[node.fullPath] = !m.ExpandedFolders[node.fullPath]
+	m.VisibleNodes = flattenTree(m.TreeRoot, m.ExpandedFolders, 0)
 }
 
 func (m *Model) sortOrderLabel() string {

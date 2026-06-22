@@ -316,24 +316,31 @@ func (m *Model) renderKeysPanel(panelW, height int) string {
 	lines = append(lines, title)
 
 	var contentLines []string
-	if len(m.Keys) == 0 {
+	if len(m.VisibleNodes) == 0 {
 		contentLines = append(contentLines, normalStyle.Render("  no keys"))
 	} else {
-		end := min(len(m.Keys), m.KeyScroll+listH)
+		end := min(len(m.VisibleNodes), m.KeyScroll+listH)
 		for i := m.KeyScroll; i < end; i++ {
-			key := m.Keys[i]
-			if lipgloss.Width(key) > panelW-4 {
-				key = truncate(key, panelW-4)
+			node := m.VisibleNodes[i]
+			indent := strings.Repeat("  ", node.depth)
+			displayName := node.name
+			suffix := ""
+			if node.isFolder {
+				suffix = "›"
 			}
-			prefix := "  "
+			available := panelW - 4 - node.depth*2
+			if available < 8 {
+				available = 8
+			}
+			if lipgloss.Width(displayName)+lipgloss.Width(suffix) > available {
+				displayName = truncate(displayName, available-lipgloss.Width(suffix))
+			}
+			displayName += suffix
+			line := indent + displayName
 			if i == m.KeyCursor && m.PanelFocus == panelKeys {
-				prefix = "▸ "
-			}
-			line := prefix + key
-			if i == m.KeyCursor {
-				contentLines = append(contentLines, selectedStyle.Render(line))
+				contentLines = append(contentLines, selectedStyle.Render("▸ "+line))
 			} else {
-				contentLines = append(contentLines, normalStyle.Render(line))
+				contentLines = append(contentLines, normalStyle.Render("  "+line))
 			}
 		}
 	}
