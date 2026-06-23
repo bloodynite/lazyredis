@@ -811,7 +811,7 @@ func (m *Model) handleBrowserKeys(key string, msg tea.KeyMsg) (tea.Model, tea.Cm
 		}
 		m.EditMode = editRefreshInterval
 		m.EditInput.SetValue(strconv.Itoa(sec))
-		m.EditInput.Placeholder = "seconds (0=off)"
+		m.EditInput.Placeholder = "seconds (0=off, min 5)"
 		m.EditInput.Focus()
 		m.PrevScreen = ScreenBrowser
 		m.Screen = ScreenKeyEdit
@@ -937,8 +937,8 @@ func (m *Model) updateEditInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		switch m.EditMode {
 		case editRefreshInterval:
 			sec, err := strconv.Atoi(value)
-			if err != nil || sec < 0 {
-				m.ErrMsg = "seconds must be >= 0"
+			if err != nil || sec < 0 || (sec > 0 && sec < 5) {
+				m.ErrMsg = "seconds must be 0 (off) or >= 5"
 				m.statusClearGen++
 				gen := m.statusClearGen
 				return m, clearStatusAfter(statusMessageDuration, gen)
