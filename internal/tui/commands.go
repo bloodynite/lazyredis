@@ -66,6 +66,8 @@ type autoRefreshMsg struct {
 	gen uint64
 }
 
+type tickMsg time.Time
+
 type statusClearMsg struct {
 	gen uint64
 }
@@ -256,6 +258,12 @@ func scheduleAutoRefresh(d time.Duration, gen uint64) tea.Cmd {
 	}
 	return tea.Tick(d, func(time.Time) tea.Msg {
 		return autoRefreshMsg{gen: gen}
+	})
+}
+
+func scheduleTick() tea.Cmd {
+	return tea.Tick(time.Second, func(t time.Time) tea.Msg {
+		return tickMsg(t)
 	})
 }
 

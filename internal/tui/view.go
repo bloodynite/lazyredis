@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"runtime/debug"
 	"strings"
+	"time"
 	"unicode/utf8"
 
 	"github.com/bloodynite/lazyredis/internal/config"
@@ -195,7 +196,44 @@ func (m *Model) autoRefreshLabel() string {
 	if sec <= 0 {
 		return "off"
 	}
-	return fmt.Sprintf("%ds", sec)
+	return fmt.Sprintf("%ds %s", sec, refreshBar(time.Since(m.RefreshStartedAt), sec, m.TickFrame))
+}
+
+func refreshBar(elapsed time.Duration, intervalSec int, frame int) string {
+	const width = 10
+	if intervalSec <= 0 {
+		return strings.Repeat("▢", width)
+	}
+	if elapsed < 0 {
+		elapsed = 0
+	}
+	progress := float64(elapsed) / float64(time.Duration(intervalSec)*time.Second)
+	if progress > 1 {
+		progress = 1
+	}
+	filled := int(progress * float64(width))
+	if filled > width {
+		filled = width
+	}
+	boundary := []string{"▣", "▢"}[frame%2]
+	animatedPos := -1
+	if filled > 0 && filled < width {
+		animatedPos = filled
+	} else if filled == width {
+		animatedPos = width - 1
+	}
+	var b strings.Builder
+	for i := 0; i < width; i++ {
+		switch {
+		case i == animatedPos:
+			b.WriteString(boundary)
+		case i < filled:
+			b.WriteString("▣")
+		default:
+			b.WriteString("▢")
+		}
+	}
+	return b.String()
 }
 
 func (m *Model) browserPanelWidths() (left, right int) {

@@ -1,6 +1,8 @@
 package tui
 
 import (
+	"time"
+
 	"github.com/charmbracelet/bubbles/spinner"
 	"github.com/charmbracelet/bubbles/textarea"
 	"github.com/charmbracelet/bubbles/textinput"
@@ -109,6 +111,9 @@ type Model struct {
 
 	refreshGen uint64
 
+	RefreshStartedAt time.Time
+	TickFrame        int
+
 	EditMode     editMode
 	EditInput    textinput.Model
 	EditField    string
@@ -191,6 +196,7 @@ func New() *Model {
 		ConfirmInput:      confirmInput,
 		ScanPattern:       "*",
 		refreshGen:        1,
+		RefreshStartedAt:  time.Now(),
 		ExpandedFolders:   make(map[string]bool),
 	}
 }
