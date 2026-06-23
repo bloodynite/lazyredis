@@ -231,3 +231,58 @@ func TestHelpModalOpensWithQuestionMark(t *testing.T) {
 		t.Fatalf("view with help open should contain modal title; got %q", out)
 	}
 }
+
+// TestHelpModalListsTtlAndAutoRefreshOnBrowserScreen verifies the help modal
+// still surfaces ttl and auto refresh on the browser screen, even though
+// the keybar hides those shortcuts. The defs come from browserHelpOnlyDefs
+// under the "Browser · More" group.
+func TestHelpModalListsTtlAndAutoRefreshOnBrowserScreen(t *testing.T) {
+	m := New()
+	m.Width = 100
+	m.Height = 30
+	m.Screen = ScreenBrowser
+	m.Client = &store.Client{}
+	m.SelectedKey = "demo:key"
+	m.KeyDetail = &store.KeyDetail{
+		Meta:   store.KeyMeta{Type: "string", Key: "demo:key"},
+		String: "hello",
+	}
+
+	out := m.renderHelpModal()
+	if !strings.Contains(out, "Browser · More") {
+		t.Fatalf("help modal on browser screen should contain 'Browser · More' group; got %q", out)
+	}
+	idxGroup := strings.Index(out, "Browser · More")
+	idxTTL := strings.Index(out, "ttl")
+	if idxTTL < 0 {
+		t.Fatalf("help modal on browser screen should list 'ttl'; got %q", out)
+	}
+	if idxTTL < idxGroup {
+		t.Fatalf("'ttl' entry should appear inside the 'Browser · More' group; group=%d ttl=%d", idxGroup, idxTTL)
+	}
+	if !strings.Contains(out, "auto refresh") {
+		t.Fatalf("help modal on browser screen should list 'auto refresh'; got %q", out)
+	}
+	idxAuto := strings.Index(out, "auto refresh")
+	if idxAuto < idxGroup {
+		t.Fatalf("'auto refresh' entry should appear inside the 'Browser · More' group; group=%d auto=%d", idxGroup, idxAuto)
+	}
+}
+
+// TestHelpModalOmitsTtlAndAutoRefreshOnProfilesScreen verifies the new
+// browser-only help defs do not leak into other screens. The Profiles
+// help modal must mention neither ttl nor auto refresh.
+func TestHelpModalOmitsTtlAndAutoRefreshOnProfilesScreen(t *testing.T) {
+	m := New()
+	m.Width = 100
+	m.Height = 30
+	m.Screen = ScreenProfiles
+
+	out := m.renderHelpModal()
+	if strings.Contains(out, "Browser · More") {
+		t.Fatalf("help modal on Profiles screen must not include 'Browser · More' group; got %q", out)
+	}
+	if strings.Contains(out, "auto refresh") {
+		t.Fatalf("help modal on Profiles screen must not mention 'auto refresh'; got %q", out)
+	}
+}

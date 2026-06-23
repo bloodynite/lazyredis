@@ -366,3 +366,74 @@ func TestApplicableHelpActionsDedupsAcrossScopes(t *testing.T) {
 		}
 	}
 }
+
+// TestKeybarHidesTtlAndAutoRefreshEverywhere verifies the keybar never
+// surfaces ttl or auto refresh entries on the browser screen, regardless of
+// panel focus. Those shortcuts stay reachable via the key handlers and the
+// help modal.
+func TestKeybarHidesTtlAndAutoRefreshEverywhere(t *testing.T) {
+	cases := []struct {
+		name  string
+		focus panelFocus
+	}{
+		{"keys focus", panelKeys},
+		{"detail focus", panelDetail},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			m := New()
+			m.Width = 120
+			m.Height = 24
+			m.Screen = ScreenBrowser
+			m.Client = &store.Client{}
+			m.PanelFocus = tc.focus
+			m.SelectedKey = "demo:key"
+			m.KeyDetail = &store.KeyDetail{
+				Meta:   store.KeyMeta{Type: "string", Key: "demo:key"},
+				String: "hello",
+			}
+
+			for _, b := range m.keyBinds() {
+				if b.Desc == "ttl" || b.Desc == "auto refresh" {
+					t.Fatalf("%s keybar must not show %q", tc.name, b.Desc)
+				}
+			}
+			main, pinned := m.keybarBinds()
+			for _, b := range append(append([]keyBind{}, main...), pinned...) {
+				if b.Desc == "ttl" || b.Desc == "auto refresh" {
+					t.Fatalf("%s keybar (split) must not show %q", tc.name, b.Desc)
+				}
+			}
+
+			bar := m.renderKeybar()
+			for _, hidden := range []string{"ttl", "auto refresh"} {
+				if strings.Contains(bar, hidden) {
+					t.Fatalf("%s keybar must not mention %q; got %q", tc.name, hidden, bar)
+				}
+			}
+		})
+	}
+}
+
+// TestKeybarNoLongerExposesTtlInApplicableHelpActions guards the structural
+// invariant behind TestKeybarHidesTtlAndAutoRefreshEverywhere: the action
+// list that feeds the keybar must no longer include actionBrowserTTL or
+// actionBrowserAutoRefresh on the browser screen.
+func TestKeybarNoLongerExposesTtlInApplicableHelpActions(t *testing.T) {
+	m := New()
+	m.Width = 120
+	m.Height = 24
+	m.Screen = ScreenBrowser
+	m.Client = &store.Client{}
+	m.SelectedKey = "demo:key"
+	m.KeyDetail = &store.KeyDetail{
+		Meta:   store.KeyMeta{Type: "string", Key: "demo:key"},
+		String: "hello",
+	}
+
+	for _, d := range m.applicableHelpActions() {
+		if d.id == actionBrowserTTL || d.id == actionBrowserAutoRefresh {
+			t.Fatalf("applicableHelpActions must not include %q; keybar would surface it", d.id)
+		}
+	}
+}

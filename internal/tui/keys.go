@@ -335,10 +335,10 @@ func (m *Model) helpGroups() []helpGroup {
 	}
 	switch m.Screen {
 	case ScreenBrowser:
-		groups = append(groups, helpGroup{
-			Title: "Browser · Common",
-			Defs:  m.browserCommonDefs(),
-		})
+		groups = append(groups,
+			helpGroup{Title: "Browser · Common", Defs: m.browserCommonDefs()},
+			helpGroup{Title: "Browser · More", Defs: m.browserHelpOnlyDefs()},
+		)
 		switch {
 		case m.DetailSearchFocus:
 			groups = append(groups,
@@ -378,17 +378,20 @@ func (m *Model) helpGroups() []helpGroup {
 }
 
 func (m *Model) browserCommonDefs() []bindDef {
-	defs := []bindDef{
+	return []bindDef{
 		{actionBrowserDisconnect, "disconnect", scopeBrowserCommon},
 		{actionBrowserTab, "switch panel", scopeBrowserCommon},
 		{actionBrowserUp, "up", scopeBrowserCommon},
 		{actionBrowserDown, "down", scopeBrowserCommon},
 		{actionBrowserFlush, "flush db", scopeBrowserCommon},
 	}
-	if m.SelectedKey != "" {
-		defs = append(defs, bindDef{actionBrowserTTL, "ttl", scopeBrowserCommon})
+}
+
+func (m *Model) browserHelpOnlyDefs() []bindDef {
+	return []bindDef{
+		{actionBrowserTTL, "ttl", scopeBrowserCommon},
+		{actionBrowserAutoRefresh, "auto refresh", scopeBrowserKeys},
 	}
-	return defs
 }
 
 func (m *Model) browserKeysDefs() []bindDef {
@@ -397,7 +400,6 @@ func (m *Model) browserKeysDefs() []bindDef {
 		{actionBrowserSortOrder, "sort order", scopeBrowserKeys},
 		{actionBrowserNewKey, "new key", scopeBrowserKeys},
 		{actionBrowserRefresh, "refresh", scopeBrowserKeys},
-		{actionBrowserAutoRefresh, "auto refresh", scopeBrowserKeys},
 	}
 	if m.ScanCursor != 0 {
 		defs = append([]bindDef{
