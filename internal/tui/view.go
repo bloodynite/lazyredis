@@ -2,6 +2,7 @@ package tui
 
 import (
 	"fmt"
+	"math"
 	"runtime/debug"
 	"strings"
 	"time"
@@ -199,10 +200,16 @@ func (m *Model) autoRefreshLabel() string {
 	return fmt.Sprintf("%ds %s", sec, refreshBar(time.Since(m.RefreshStartedAt), sec))
 }
 
+func barCells(intervalSec int) int {
+	return 10
+}
+
 func refreshBar(elapsed time.Duration, intervalSec int) string {
-	const width = 10
+	const filledRune = "■"
+	const emptyRune = "□"
+	width := barCells(intervalSec)
 	if intervalSec <= 0 {
-		return strings.Repeat("▢", width)
+		return strings.Repeat(emptyRune, width)
 	}
 	if elapsed < 0 {
 		elapsed = 0
@@ -211,17 +218,11 @@ func refreshBar(elapsed time.Duration, intervalSec int) string {
 	if progress > 1 {
 		progress = 1
 	}
-	filled := int(progress * float64(width))
-	if filled > width {
-		filled = width
-	}
+	filled := int(math.Round(progress * float64(width)))
 	if filled <= 0 {
-		return strings.Repeat("▢", width)
+		return strings.Repeat(emptyRune, width)
 	}
-	if filled >= width {
-		return strings.Repeat("▣", width)
-	}
-	return strings.Repeat("▣", filled) + strings.Repeat("▢", width-filled)
+	return strings.Repeat(filledRune, filled) + strings.Repeat(emptyRune, width-filled)
 }
 
 func (m *Model) browserPanelWidths() (left, right int) {
@@ -683,8 +684,8 @@ func (m *Model) viewKeyEdit() string {
 		title = "Add item"
 	case editTTL:
 		title = "TTL for: " + m.SelectedKey
-	case editRefreshInterval:
-		title = "Auto refresh interval (seconds, 0=off)"
+	default:
+		title = "Edit"
 	}
 	if (m.EditMode == editElement || m.EditMode == editElementAdd) && m.elementEditUsesTextarea() {
 		m.syncNewKeyLayout()
@@ -708,11 +709,47 @@ func (m *Model) renderEditModal() string {
 	if m.EditMode == editTTL {
 		return m.renderTTLModal()
 	}
-	inner := panelTitleStyle.Render("Auto refresh") + "\n\n" +
-		m.EditInput.View() + "\n\n" +
-		confirmHintStyle.Render(m.editEnterSaveCancelHint())
-	width := min(56, max(36, lipgloss.Width(m.EditInput.View())+8))
+	if m.EditMode == editRefreshInterval {
+		return m.renderRefreshIntervalModal()
+	}
+	return ""
+}
+
+func (m *Model) renderRefreshIntervalModal() string {
+	var lines []string
+	lines = append(lines, panelTitleStyle.Render("Auto refresh"))
+	lines = append(lines, "")
+	lines = append(lines, m.renderRefreshIntervalChoices()...)
+	lines = append(lines, "")
+	lines = append(lines, confirmHintStyle.Render(m.editEnterSaveCancelHint()))
+	inner := strings.Join(lines, "\n")
+	width := min(40, max(20, m.Width-4))
 	return confirmModalStyle.Width(width).Render(inner)
+}
+
+func (m *Model) renderRefreshIntervalChoices() []string {
+	lines := make([]string, 0, len(refreshIntervalChoices))
+	cur := m.RefreshIntervalCursor
+	if cur < 0 || cur >= len(refreshIntervalChoices) {
+		cur = 0
+	}
+	for i, sec := range refreshIntervalChoices {
+		label := fmt.Sprintf("%ds", sec)
+		if sec == 0 {
+			label = "off"
+		}
+		prefix := "    "
+		if i == cur {
+			prefix = "  ▸ "
+		}
+		line := prefix + label
+		if i == cur {
+			lines = append(lines, selectedStyle.Render(line))
+		} else {
+			lines = append(lines, normalStyle.Render(line))
+		}
+	}
+	return lines
 }
 
 func (m *Model) renderTTLModal() string {

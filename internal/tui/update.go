@@ -413,6 +413,9 @@ func (m *Model) handleInputKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if m.EditMode == editTTL {
 			return m.updateTTLModalInputs(msg)
 		}
+		if m.EditMode == editRefreshInterval {
+			return m.updateRefreshIntervalModal(msg)
+		}
 		if (m.EditMode == editElement || m.EditMode == editElementAdd) && m.elementEditUsesTextarea() {
 			return m.updateElementTextareaInput(msg)
 		}
@@ -816,9 +819,8 @@ func (m *Model) handleBrowserKeys(key string, msg tea.KeyMsg) (tea.Model, tea.Cm
 			sec = m.Config.GetRefreshIntervalSec()
 		}
 		m.EditMode = editRefreshInterval
-		m.EditInput.SetValue(strconv.Itoa(sec))
-		m.EditInput.Placeholder = "seconds (0=off, min 5)"
-		m.EditInput.Focus()
+		m.RefreshIntervalCursor = refreshIntervalCursor(sec)
+		m.blurEditInputs()
 		m.PrevScreen = ScreenBrowser
 		m.Screen = ScreenKeyEdit
 	case m.matchAction(actionBrowserSortOrder, key):
@@ -1038,6 +1040,27 @@ func (m *Model) updateTTLModalInputs(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	var cmd tea.Cmd
 	m.NewKeyTTL, cmd = m.NewKeyTTL.Update(msg)
 	return m, cmd
+}
+
+func (m *Model) updateRefreshIntervalModal(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	key := msg.String()
+	switch {
+	case m.matchAction(actionSave, key) || key == "enter":
+		return m.submitRefreshInterval()
+	case m.matchAction(actionBrowserUp, key):
+		m.RefreshIntervalCursor = (m.RefreshIntervalCursor - 1 + len(refreshIntervalChoices)) % len(refreshIntervalChoices)
+		return m, nil
+	case m.matchAction(actionBrowserDown, key):
+		m.RefreshIntervalCursor = (m.RefreshIntervalCursor + 1) % len(refreshIntervalChoices)
+		return m, nil
+	}
+	return m, nil
+}
+
+func (m *Model) submitRefreshInterval() (tea.Model, tea.Cmd) {
+	sec := refreshIntervalChoices[m.RefreshIntervalCursor]
+	m.Loading = true
+	return m, saveRefreshInterval(m.Config, sec)
 }
 
 func (m *Model) submitTTLModal() (tea.Model, tea.Cmd) {

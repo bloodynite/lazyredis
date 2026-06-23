@@ -47,10 +47,10 @@ func TestRenderEditModal(t *testing.T) {
 	}
 
 	m.EditMode = editRefreshInterval
-	m.EditInput.SetValue("5")
+	m.RefreshIntervalCursor = refreshIntervalCursor(5)
 	modal = m.renderEditModal()
-	if !strings.Contains(modal, "5") {
-		t.Fatal("expected refresh value in modal")
+	if !strings.Contains(modal, "5s") {
+		t.Fatal("expected refresh value 5s in modal")
 	}
 
 	m.EditMode = editTTL

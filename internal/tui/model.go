@@ -66,6 +66,8 @@ const (
 
 var keyFormTypes = []string{"string", "hash", "list", "set", "zset", "stream"}
 
+var refreshIntervalChoices = []int{0, 5, 10, 15, 30, 60}
+
 type Model struct {
 	Width  int
 	Height int
@@ -117,6 +119,8 @@ type Model struct {
 	EditInput    textinput.Model
 	EditField    string
 	EditNewType  string
+
+	RefreshIntervalCursor int
 
 	NewKeyTTL    textinput.Model
 	NewKeyName   textinput.Model
@@ -206,6 +210,15 @@ func newFormInput(placeholder string) textinput.Model {
 	ti.CharLimit = 256
 	ti.Width = 40
 	return ti
+}
+
+func refreshIntervalCursor(sec int) int {
+	for i, v := range refreshIntervalChoices {
+		if v == sec {
+			return i
+		}
+	}
+	return 0
 }
 
 func (m *Model) Init() tea.Cmd {

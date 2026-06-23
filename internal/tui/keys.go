@@ -507,6 +507,13 @@ func (m *Model) keyEditDefs() []bindDef {
 			}, defs...)
 		}
 		return defs
+	case editRefreshInterval:
+		return []bindDef{
+			{actionBrowserUp, "up", scopeKeyEdit},
+			{actionBrowserDown, "down", scopeKeyEdit},
+			{actionSave, "save", scopeKeyEdit},
+			{actionEditEsc, "cancel", scopeKeyEdit},
+		}
 	default:
 		return []bindDef{
 			{actionSave, "save", scopeKeyEdit},
