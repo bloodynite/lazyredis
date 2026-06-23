@@ -36,10 +36,22 @@ Edit key modal with TTL, type, and value fields:
 
 ## Install
 
-From a release tag:
+Quick install (downloads the release binary into `~/.local/bin`):
 
 ```bash
-go install github.com/bloodynite/lazyredis/cmd/lazyredis@v0.0.8
+./install.sh
+```
+
+Override the install location and version:
+
+```bash
+INSTALL_VERSION=v0.1.0 INSTALL_DIR=/usr/local/bin ./install.sh
+```
+
+From a release tag directly:
+
+```bash
+go install github.com/bloodynite/lazyredis/cmd/lazyredis@v0.1.0
 ```
 
 Then run:
