@@ -2,12 +2,15 @@ package tui
 
 import (
 	"fmt"
-	"strings"
 	"runtime/debug"
+	"strings"
+	"time"
+	"unicode/utf8"
 
-	"github.com/charmbracelet/lipgloss"
 	"github.com/bloodynite/lazyredis/internal/config"
 	"github.com/bloodynite/lazyredis/internal/store"
+	"github.com/charmbracelet/lipgloss"
+	"github.com/mattn/go-runewidth"
 )
 
 func (m *Model) View() string {
@@ -38,7 +41,7 @@ func (m *Model) View() string {
 	if m.HelpOpen {
 		out = m.applyHelpOverlay(out)
 	}
-	return out
+	return fitViewHeight(out, m.Height)
 }
 
 func (m *Model) viewDisconnectedLayout() string {
@@ -193,7 +196,32 @@ func (m *Model) autoRefreshLabel() string {
 	if sec <= 0 {
 		return "off"
 	}
-	return fmt.Sprintf("%ds", sec)
+	return fmt.Sprintf("%ds %s", sec, refreshBar(time.Since(m.RefreshStartedAt), sec))
+}
+
+func refreshBar(elapsed time.Duration, intervalSec int) string {
+	const width = 10
+	if intervalSec <= 0 {
+		return strings.Repeat("▢", width)
+	}
+	if elapsed < 0 {
+		elapsed = 0
+	}
+	progress := float64(elapsed) / float64(time.Duration(intervalSec)*time.Second)
+	if progress > 1 {
+		progress = 1
+	}
+	filled := int(progress * float64(width))
+	if filled > width {
+		filled = width
+	}
+	if filled <= 0 {
+		return strings.Repeat("▢", width)
+	}
+	if filled >= width {
+		return strings.Repeat("▣", width)
+	}
+	return strings.Repeat("▣", filled) + strings.Repeat("▢", width-filled)
 }
 
 func (m *Model) browserPanelWidths() (left, right int) {
@@ -222,9 +250,47 @@ func (m *Model) renderBrowserPanels() string {
 		rightStyle = panelFocusedStyle
 	}
 
-	left := leftStyle.Width(leftW-panelHorizontalPadding).Height(height).Render(m.renderKeysPanel(leftW-panelChromeCols, height))
-	right := rightStyle.Width(rightW-panelHorizontalPadding).Height(height).Render(m.renderDetailPanel(rightW-panelChromeCols, height))
+	left := renderTitledPanel(leftStyle, leftW, height, "Keys", m.renderKeysPanel(leftW-panelChromeCols, height))
+	detailTitle := "Detail"
+	if m.SelectedKey != "" {
+		detailTitle = truncate(m.SelectedKey, rightW-panelChromeCols-4)
+	}
+	right := renderTitledPanel(rightStyle, rightW, height, detailTitle, m.renderDetailPanel(rightW-panelChromeCols, height))
 	return lipgloss.JoinHorizontal(lipgloss.Top, left, right)
+}
+
+func renderTitledPanel(style lipgloss.Style, outerWidth, height int, title, body string) string {
+	panel := style.Width(outerWidth - panelHorizontalPadding).Height(height).Render(body)
+	return injectPanelTitle(panel, title, style)
+}
+
+func injectPanelTitle(panel, title string, style lipgloss.Style) string {
+	if title == "" {
+		return panel
+	}
+
+	lines := strings.Split(panel, "\n")
+	if len(lines) == 0 {
+		return panel
+	}
+
+	topWidth := lipgloss.Width(lines[0])
+	if topWidth < 4 {
+		return panel
+	}
+
+	title = truncatePlain(title, topWidth-4)
+	label := " " + panelTitleStyle.Render(title) + " "
+	fillerWidth := topWidth - 2 - lipgloss.Width(label)
+	if fillerWidth < 0 {
+		fillerWidth = 0
+	}
+
+	borderStyle := lipgloss.NewStyle().
+		Foreground(style.GetBorderTopForeground()).
+		Background(style.GetBorderTopBackground())
+	lines[0] = borderStyle.Render("┌") + label + borderStyle.Render(strings.Repeat("─", fillerWidth)) + borderStyle.Render("┐")
+	return strings.Join(lines, "\n")
 }
 
 func clipPanelLines(lines []string, maxLines int) string {
@@ -263,41 +329,46 @@ func (m *Model) renderKeysPanel(panelW, height int) string {
 	const titleRows = 1
 	const metaRows = 1
 
-	title := panelTitleStyle.Render("Keys")
 	pattern := m.ScanPattern
 	if pattern == "" {
 		pattern = "*"
 	}
-	if m.SearchFocus {
-		m.SearchInput.Width = max(4, panelW-6)
-		title += "  " + m.SearchInput.View()
-	} else {
-		title += "  " + helpStyle.Render(pattern)
-	}
 
 	listH := max(1, height-titleRows-metaRows)
 	var lines []string
-	lines = append(lines, title)
+	if m.SearchFocus {
+		m.SearchInput.Width = max(4, panelW-6)
+		lines = append(lines, m.SearchInput.View())
+	} else {
+		lines = append(lines, helpStyle.Render("  "+pattern))
+	}
 
 	var contentLines []string
-	if len(m.Keys) == 0 {
+	if len(m.VisibleNodes) == 0 {
 		contentLines = append(contentLines, normalStyle.Render("  no keys"))
 	} else {
-		end := min(len(m.Keys), m.KeyScroll+listH)
+		end := min(len(m.VisibleNodes), m.KeyScroll+listH)
 		for i := m.KeyScroll; i < end; i++ {
-			key := m.Keys[i]
-			if lipgloss.Width(key) > panelW-4 {
-				key = truncate(key, panelW-4)
+			node := m.VisibleNodes[i]
+			indent := strings.Repeat("  ", node.depth)
+			displayName := node.name
+			suffix := ""
+			if node.isFolder {
+				suffix = "›"
 			}
-			prefix := "  "
+			available := panelW - 4 - node.depth*2
+			if available < 8 {
+				available = 8
+			}
+			if lipgloss.Width(displayName)+lipgloss.Width(suffix) > available {
+				displayName = truncate(displayName, available-lipgloss.Width(suffix))
+			}
+			displayName += suffix
+			line := indent + displayName
 			if i == m.KeyCursor && m.PanelFocus == panelKeys {
-				prefix = "▸ "
-			}
-			line := prefix + key
-			if i == m.KeyCursor {
-				contentLines = append(contentLines, selectedStyle.Render(line))
+				contentLines = append(contentLines, selectedStyle.Render("▸ "+line))
 			} else {
-				contentLines = append(contentLines, normalStyle.Render(line))
+				contentLines = append(contentLines, normalStyle.Render("  "+line))
 			}
 		}
 	}
@@ -317,30 +388,40 @@ func (m *Model) renderKeysPanel(panelW, height int) string {
 }
 
 func (m *Model) keysPanelMeta() string {
+	indicator := m.sortOrderIndicator()
 	loaded := len(m.Keys)
 	if loaded == 0 && m.ScanCursor == 0 {
+		if indicator != "" {
+			return fmt.Sprintf("0 keys · %s", indicator)
+		}
 		return "0 keys"
 	}
 	if m.ScanCursor != 0 {
 		if m.ScanPattern == "*" && m.Info != nil && m.Info.TotalKeys > int64(loaded) {
+			if indicator != "" {
+				return fmt.Sprintf("%d/%d · g · %s", loaded, m.Info.TotalKeys, indicator)
+			}
 			return fmt.Sprintf("%d/%d · g", loaded, m.Info.TotalKeys)
+		}
+		if indicator != "" {
+			return fmt.Sprintf("%d · g · %s", loaded, indicator)
 		}
 		return fmt.Sprintf("%d · g", loaded)
 	}
 	if m.ScanPattern == "*" && m.Info != nil {
+		if indicator != "" {
+			return fmt.Sprintf("%d/%d keys · %s", loaded, m.Info.TotalKeys, indicator)
+		}
 		return fmt.Sprintf("%d/%d keys", loaded, m.Info.TotalKeys)
+	}
+	if indicator != "" {
+		return fmt.Sprintf("%d keys loaded · %s", loaded, indicator)
 	}
 	return fmt.Sprintf("%d keys loaded", loaded)
 }
 
 func (m *Model) renderDetailPanel(panelW, height int) string {
-	title := panelTitleStyle.Render("Detail")
-	if m.SelectedKey != "" {
-		title = panelTitleStyle.Render(truncate(m.SelectedKey, panelW-4))
-	}
-
 	var lines []string
-	lines = append(lines, title)
 	if m.KeyDetail == nil {
 		if m.Loading && m.SelectedKey != "" {
 			lines = append(lines, normalStyle.Render("  loading…"))
@@ -351,6 +432,12 @@ func (m *Model) renderDetailPanel(panelW, height int) string {
 	}
 
 	d := m.KeyDetail
+	extraRows := 0
+	if m.DetailSearchFocus {
+		m.DetailSearchInput.Width = max(4, panelW-6)
+		lines = append(lines, m.DetailSearchInput.View())
+		extraRows = 1
+	}
 	lines = append(lines,
 		fmt.Sprintf("  %s  %s",
 			typeStyle(d.Meta.Type).Render(d.Meta.Type),
@@ -358,97 +445,129 @@ func (m *Model) renderDetailPanel(panelW, height int) string {
 		),
 	)
 
-	listH := max(1, height-2)
-	body := m.renderDetailBody(d, panelW, listH)
+	listH := max(1, height-2-extraRows)
+	query := m.detailSearchQuery()
+	body := m.renderDetailBody(d, panelW, listH, query)
 	lines = append(lines, body...)
 	return clipPanelLines(lines, height)
 }
 
-func (m *Model) renderDetailBody(d *store.KeyDetail, panelW, listH int) []string {
+func (m *Model) detailSearchQuery() string {
+	if m.DetailSearchInput.Value() == "" {
+		return ""
+	}
+	if m.DetailSearchFocus {
+		return ""
+	}
+	return m.DetailSearchInput.Value()
+}
+
+func (m *Model) isActiveDetailMatch(idx int) bool {
+	if m.DetailSearchCursor < 0 || m.DetailSearchCursor >= len(m.DetailSearchMatches) {
+		return false
+	}
+	return m.DetailSearchMatches[m.DetailSearchCursor] == idx
+}
+
+func (m *Model) renderDetailBody(d *store.KeyDetail, panelW, listH int, query string) []string {
 	var lines []string
 	inDetail := m.PanelFocus == panelDetail
 
 	switch d.Meta.Type {
 	case "string":
-		lines = append(lines, wrapValue("value", d.String, panelW, listH)...)
+		activeChunk, activeOffset := -1, -1
+		if m.DetailSearchCursor >= 0 && m.DetailSearchCursor < len(m.DetailSearchMatches) {
+			maxW := max(8, panelW-4)
+			pos := m.DetailSearchMatches[m.DetailSearchCursor]
+			activeChunk, activeOffset = chunkPositionForByteOffset(d.String, maxW, pos)
+		}
+		lines = append(lines, wrapValueWithQuery("value", d.String, query, panelW, listH, m.DetailScroll, activeChunk, activeOffset)...)
 	case "hash":
 		fields := hashFields(d.Hash)
 		end := min(len(fields), m.DetailScroll+listH)
 		for i := m.DetailScroll; i < end; i++ {
-			f := fields[i]
-			prefix := "  "
-			if i == m.DetailCursor && inDetail {
-				prefix = "▸ "
-			}
-			val := truncate(d.Hash[f], max(8, panelW-lipgloss.Width(f)-6))
-			line := fmt.Sprintf("%s%s = %s", prefix, f, val)
-			if i == m.DetailCursor && inDetail {
-				lines = append(lines, selectedStyle.Render(line))
-			} else {
-				lines = append(lines, normalStyle.Render(line))
-			}
+			lines = append(lines, m.renderCompositeRow(query, inDetail, i, func() string {
+				f := fields[i]
+				val := truncate(d.Hash[f], max(8, panelW-lipgloss.Width(f)-6))
+				return fmt.Sprintf("%s%s = %s", compositeRowPrefix(i, inDetail, m.DetailCursor), f, val)
+			})...)
 		}
 	case "list":
 		end := min(len(d.List), m.DetailScroll+listH)
 		for i := m.DetailScroll; i < end; i++ {
-			prefix := "  "
-			if i == m.DetailCursor && inDetail {
-				prefix = "▸ "
-			}
-			line := fmt.Sprintf("%s[%d] %s", prefix, i, truncate(d.List[i], max(8, panelW-8)))
-			if i == m.DetailCursor && inDetail {
-				lines = append(lines, selectedStyle.Render(line))
-			} else {
-				lines = append(lines, normalStyle.Render(line))
-			}
+			lines = append(lines, m.renderCompositeRow(query, inDetail, i, func() string {
+				val := truncate(d.List[i], max(8, panelW-8))
+				return fmt.Sprintf("%s[%d] %s", compositeRowPrefix(i, inDetail, m.DetailCursor), i, val)
+			})...)
 		}
 	case "set":
 		end := min(len(d.Set), m.DetailScroll+listH)
 		for i := m.DetailScroll; i < end; i++ {
-			prefix := "  "
-			if i == m.DetailCursor && inDetail {
-				prefix = "▸ "
-			}
-			line := prefix + truncate(d.Set[i], max(8, panelW-4))
-			if i == m.DetailCursor && inDetail {
-				lines = append(lines, selectedStyle.Render(line))
-			} else {
-				lines = append(lines, normalStyle.Render(line))
-			}
+			lines = append(lines, m.renderCompositeRow(query, inDetail, i, func() string {
+				val := truncate(d.Set[i], max(8, panelW-4))
+				return compositeRowPrefix(i, inDetail, m.DetailCursor) + val
+			})...)
 		}
 	case "zset":
 		end := min(len(d.ZSet), m.DetailScroll+listH)
 		for i := m.DetailScroll; i < end; i++ {
 			z := d.ZSet[i]
-			prefix := "  "
-			if i == m.DetailCursor && inDetail {
-				prefix = "▸ "
-			}
-			line := fmt.Sprintf("%s%s (%.2f)", prefix, z.Member, z.Score)
-			if i == m.DetailCursor && inDetail {
-				lines = append(lines, selectedStyle.Render(line))
-			} else {
-				lines = append(lines, normalStyle.Render(line))
-			}
+			lines = append(lines, m.renderCompositeRow(query, inDetail, i, func() string {
+				return fmt.Sprintf("%s%s (%.2f)", compositeRowPrefix(i, inDetail, m.DetailCursor), z.Member, z.Score)
+			})...)
 		}
 	case "stream":
 		end := min(len(d.Stream), m.DetailScroll+listH)
 		for i := m.DetailScroll; i < end; i++ {
 			entry := d.Stream[i]
-			prefix := "  "
-			if i == m.DetailCursor && inDetail {
-				prefix = "▸ "
-			}
-			body := truncate(formatStreamEntry(entry), max(8, panelW-12))
-			line := fmt.Sprintf("%s%s  %s", prefix, entry.ID, body)
-			if i == m.DetailCursor && inDetail {
-				lines = append(lines, selectedStyle.Render(line))
-			} else {
-				lines = append(lines, normalStyle.Render(line))
-			}
+			lines = append(lines, m.renderCompositeRow(query, inDetail, i, func() string {
+				body := truncate(formatStreamEntry(entry), max(8, panelW-12))
+				return fmt.Sprintf("%s%s  %s", compositeRowPrefix(i, inDetail, m.DetailCursor), entry.ID, body)
+			})...)
 		}
 	}
 	return lines
+}
+
+func compositeRowPrefix(i int, inDetail bool, cursor int) string {
+	if inDetail && i == cursor {
+		return "▸ "
+	}
+	return "  "
+}
+
+const detailNewlineMarker = "↵"
+const detailTabSpaces = "    "
+
+func sanitizeDetailRow(s string) string {
+	if !strings.ContainsAny(s, "\r\n\t") {
+		return s
+	}
+	s = strings.ReplaceAll(s, "\r\n", detailNewlineMarker)
+	s = strings.ReplaceAll(s, "\n", detailNewlineMarker)
+	s = strings.ReplaceAll(s, "\r", detailNewlineMarker)
+	s = strings.ReplaceAll(s, "\t", detailTabSpaces)
+	return s
+}
+
+func (m *Model) renderCompositeRow(query string, inDetail bool, idx int, lineFn func() string) []string {
+	line := sanitizeDetailRow(lineFn())
+	isCursor := inDetail && idx == m.DetailCursor
+	isActive := isCursor && m.isActiveDetailMatch(idx)
+	switch {
+	case isActive && query != "":
+		rendered := normalStyle.Render(line)
+		rendered = highlightAllWithStyle(rendered, query, activeSearchMatchStyle)
+		return []string{rendered}
+	case isCursor:
+		return []string{selectedStyle.Render(line)}
+	default:
+		rendered := normalStyle.Render(line)
+		if query != "" {
+			rendered = highlightSubstring(rendered, query)
+		}
+		return []string{rendered}
+	}
 }
 
 func formatStreamEntry(entry store.StreamEntry) string {
@@ -692,6 +811,23 @@ func (m *Model) syncNewKeyLayout() {
 	if m.Width == 0 {
 		return
 	}
+	if m.elementEditUsesTextarea() {
+		m.syncNewKeyLayoutBodyOverlay()
+		return
+	}
+	m.syncNewKeyLayoutModal()
+}
+
+func (m *Model) syncNewKeyLayoutBodyOverlay() {
+	m.NewKeyValue.SetWidth(m.Width)
+	h := m.panelAreaLines() - 2
+	if h < 1 {
+		h = 1
+	}
+	m.NewKeyValue.SetHeight(h)
+}
+
+func (m *Model) syncNewKeyLayoutModal() {
 	inputW := min(62, max(36, m.Width*2/3-8))
 	m.NewKeyTTL.Width = inputW
 	m.NewKeyName.Width = inputW
@@ -716,13 +852,16 @@ func (m *Model) renderConfirmModal() string {
 	case confirmDeleteKey:
 		msg = fmt.Sprintf("Delete key %q?", m.ConfirmTarget)
 	case confirmFlushDB:
-		msg = "Flush the entire current database?"
+		msg = "Flush the entire current database?\nType database name to confirm"
 	case confirmDeleteProfile:
 		msg = fmt.Sprintf("Delete profile %q?", m.ConfirmTarget)
 	}
 	inner := panelTitleStyle.Render("Confirm") + "\n\n" +
-		confirmMsgStyle.Render(msg) + "\n\n" +
-		confirmHintStyle.Render("y yes   n no")
+		confirmMsgStyle.Render(msg) + "\n\n"
+	if m.ConfirmAction == confirmFlushDB {
+		inner += m.ConfirmInput.View() + "\n\n"
+	}
+	inner += confirmHintStyle.Render("y yes   n no")
 	width := min(56, max(36, lipgloss.Width(msg)+6))
 	return confirmModalStyle.Width(width).Render(inner)
 }
@@ -738,19 +877,24 @@ func (m *Model) applyHelpOverlay(base string) string {
 }
 
 func (m *Model) renderHelpModal() string {
-	defs := m.applicableHelpActions()
+	groups := m.helpGroups()
 	var lines []string
 	lines = append(lines, panelTitleStyle.Render("Keyboard shortcuts"))
 	lines = append(lines, "")
-	for _, def := range defs {
-		lines = append(lines, fmt.Sprintf("  %-16s %s", formatBindKeys(m.bindKeys(def.id)), def.desc))
+	for _, g := range groups {
+		if g.Title != "" {
+			lines = append(lines, helpGroupTitleStyle.Render(g.Title))
+		}
+		for _, def := range g.Defs {
+			lines = append(lines, fmt.Sprintf("  %-16s %s", formatBindKeys(m.bindKeys(def.id)), def.desc))
+		}
+		lines = append(lines, "")
 	}
-	lines = append(lines,
-		fmt.Sprintf("  %-16s %s", formatBindKeys(m.bindKeys(actionAppHelp)), "toggle this help"),
-		fmt.Sprintf("  %-16s %s", formatBindKeys(m.bindKeys(actionAppForceQuit)), "force quit"),
-	)
+	if len(lines) > 0 && lines[len(lines)-1] == "" {
+		lines = lines[:len(lines)-1]
+	}
 	lines = append(lines, "",
-		confirmHintStyle.Render("Customize save shortcuts with settings.shortcut_modifier"),
+		confirmHintStyle.Render("Customize shortcut modifier with settings.shortcut_modifier"),
 		confirmHintStyle.Render("Use ctrl or alt"),
 		"",
 		confirmHintStyle.Render("Press ? or esc to close"),
@@ -771,39 +915,172 @@ func appHeaderPrefix() string {
 	return "Lazyredis " + appVersion()
 }
 
-func wrapValue(label, value string, width, maxLines int) []string {
+func fitViewHeight(out string, height int) string {
+	if height <= 0 {
+		return out
+	}
+	lines := strings.Split(out, "\n")
+	if len(lines) > height {
+		lines = lines[:height]
+	}
+	for len(lines) < height {
+		lines = append(lines, "")
+	}
+	return strings.Join(lines, "\n")
+}
+
+func wrapValue(label, value string, width, maxLines, scroll int) []string {
+	return wrapValueWithQuery(label, value, "", width, maxLines, scroll, -1, -1)
+}
+
+func wrapValueWithQuery(label, value, query string, width, maxLines, scroll, activeChunk, activeOffset int) []string {
 	if maxLines < 1 {
 		maxLines = 1
 	}
 	maxW := max(8, width-4)
+	chunks := chunkString(value, maxW)
+	if scroll < 0 {
+		scroll = 0
+	}
+	if scroll > len(chunks) {
+		scroll = len(chunks)
+	}
 	var lines []string
 	lines = append(lines, "  "+label+":")
-	maxLines--
-	for _, chunk := range chunkString(value, maxW) {
-		if maxLines <= 0 {
-			break
+	bodyVisible := maxLines - 1
+	for i, chunk := range chunks[scroll:min(len(chunks), scroll+bodyVisible)] {
+		actualChunkIdx := scroll + i
+		var rendered string
+		if actualChunkIdx == activeChunk && query != "" {
+			rendered = highlightChunkActive(chunk, query, activeOffset)
+		} else {
+			rendered = highlightSubstring(chunk, query)
 		}
-		lines = append(lines, normalStyle.Render("  "+chunk))
-		maxLines--
+		lines = append(lines, normalStyle.Render("  "+rendered))
 	}
 	return lines
 }
 
+func highlightSubstring(s, query string) string {
+	if query == "" {
+		return s
+	}
+	if !strings.Contains(strings.ToLower(s), strings.ToLower(query)) {
+		return s
+	}
+	return highlightAllWithStyle(s, query, searchMatchStyle)
+}
+
+func highlightChunkActive(chunk, query string, activeOffset int) string {
+	q := strings.ToLower(query)
+	if query == "" || !strings.Contains(strings.ToLower(chunk), q) {
+		return chunk
+	}
+	if activeOffset < 0 {
+		return highlightAllWithStyle(chunk, query, searchMatchStyle)
+	}
+	var out strings.Builder
+	cursor := 0
+	lower := strings.ToLower(chunk)
+	for {
+		idx := strings.Index(lower[cursor:], q)
+		if idx < 0 {
+			out.WriteString(chunk[cursor:])
+			break
+		}
+		start := cursor + idx
+		out.WriteString(chunk[cursor:start])
+		style := searchMatchStyle
+		if start == activeOffset {
+			style = activeSearchMatchStyle
+		}
+		out.WriteString(style.Render(chunk[start : start+len(query)]))
+		cursor = start + len(query)
+	}
+	return out.String()
+}
+
+func highlightAllWithStyle(s, query string, style lipgloss.Style) string {
+	q := strings.ToLower(query)
+	lower := strings.ToLower(s)
+	var out strings.Builder
+	cursor := 0
+	for {
+		idx := strings.Index(lower[cursor:], q)
+		if idx < 0 {
+			out.WriteString(s[cursor:])
+			break
+		}
+		start := cursor + idx
+		out.WriteString(s[cursor:start])
+		out.WriteString(style.Render(s[start : start+len(query)]))
+		cursor = start + len(query)
+	}
+	return out.String()
+}
+
 func chunkString(s string, size int) []string {
-	if len(s) <= size {
+	s = sanitizeDetailRow(s)
+	if size < 1 {
+		return []string{s}
+	}
+	if chunkDisplayWidth(s) <= size {
 		return []string{s}
 	}
 	var out []string
-	for len(s) > size {
-		out = append(out, s[:size])
-		s = s[size:]
+	for s != "" {
+		_, n := chunkBoundary(s, size)
+		if n <= 0 {
+			break
+		}
+		out = append(out, s[:n])
+		s = s[n:]
 	}
-	if s != "" {
-		out = append(out, s)
+	if len(out) == 0 {
+		return []string{s}
 	}
 	return out
 }
 
+func chunkBoundary(s string, size int) (width, bytes int) {
+	w := 0
+	for i := 0; i < len(s); {
+		r, rn := utf8.DecodeRuneInString(s[i:])
+		if r == utf8.RuneError && rn == 1 {
+			rn = 1
+		}
+		rw := runewidth.RuneWidth(r)
+		if w+rw > size && i > 0 {
+			return w, i
+		}
+		w += rw
+		i += rn
+	}
+	return w, len(s)
+}
+
+func chunkDisplayWidth(s string) int {
+	w := 0
+	for _, r := range s {
+		w += runewidth.RuneWidth(r)
+	}
+	return w
+}
+
+func chunkPositionForByteOffset(s string, size, byteOffset int) (chunkIdx, offsetInChunk int) {
+	chunks := chunkString(s, size)
+	offset := 0
+	for i, c := range chunks {
+		end := offset + len(c)
+		if byteOffset >= offset && byteOffset < end {
+			return i, byteOffset - offset
+		}
+		offset = end
+	}
+	return -1, -1
+}
+
+// truncate walks runes once (O(n) vs O(n²) in naive impl).
 func truncate(s string, n int) string {
 	if n <= 3 {
 		return s
@@ -812,8 +1089,14 @@ func truncate(s string, n int) string {
 		return s
 	}
 	runes := []rune(s)
-	for len(runes) > 0 && lipgloss.Width(string(runes)) > n-1 {
-		runes = runes[:len(runes)-1]
+	budget := n - 1
+	width := 0
+	for i, r := range runes {
+		w := runewidth.RuneWidth(r)
+		if width+w > budget {
+			return string(runes[:i]) + "…"
+		}
+		width += w
 	}
-	return string(runes) + "…"
+	return s
 }

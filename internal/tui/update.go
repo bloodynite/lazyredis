@@ -4,16 +4,18 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/atotto/clipboard"
 	"github.com/aymanbagabas/go-osc52/v2"
-	"github.com/charmbracelet/bubbles/spinner"
-	tea "github.com/charmbracelet/bubbletea"
 	"github.com/bloodynite/lazyredis/internal/config"
 	"github.com/bloodynite/lazyredis/internal/store"
+	"github.com/charmbracelet/bubbles/spinner"
+	"github.com/charmbracelet/bubbles/textinput"
+	tea "github.com/charmbracelet/bubbletea"
 )
 
 func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -49,7 +51,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.inputFocused() {
 			return m.handleInputKeys(msg)
 		}
-		return m.handleKeyPress(key)
+		return m.handleKeyPress(key, msg)
 
 	case spinner.TickMsg:
 		var cmd tea.Cmd
@@ -59,6 +61,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case statusClearMsg:
 		if msg.gen == m.statusClearGen {
 			m.Status = ""
+			m.ErrMsg = ""
 		}
 		return m, nil
 
@@ -66,11 +69,15 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.Loading = false
 		if msg.err != nil {
 			m.ErrMsg = msg.err.Error()
-			return m, nil
+			m.statusClearGen++
+			gen := m.statusClearGen
+			return m, clearStatusAfter(statusMessageDuration, gen)
 		}
 		if msg.cfg == nil {
 			m.ErrMsg = "config not loaded"
-			return m, nil
+			m.statusClearGen++
+			gen := m.statusClearGen
+			return m, clearStatusAfter(statusMessageDuration, gen)
 		}
 		m.Config = msg.cfg
 		m.Profiles = msg.cfg.Profiles
@@ -93,7 +100,9 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.Loading = false
 		if msg.err != nil {
 			m.ErrMsg = msg.err.Error()
-			return m, nil
+			m.statusClearGen++
+			gen := m.statusClearGen
+			return m, clearStatusAfter(statusMessageDuration, gen)
 		}
 		m.Client = msg.client
 		m.ErrMsg = ""
@@ -101,10 +110,17 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.PanelFocus = panelKeys
 		m.PrevScreen = ScreenProfiles
 		m.scanGen = 1
+		m.refreshGen++
+		m.detailGen = 0
 		statusCmd := m.statusClearCmd(fmt.Sprintf("connected to %s", msg.client.Profile().Name))
+		m.RefreshStartedAt = time.Now()
 		return m, tea.Batch(loadInfo(m.Client), scanKeys(m.Client, 0, m.ScanPattern, false, m.scanGen), m.Spinner.Tick, m.scheduleAutoRefreshCmd(), statusCmd)
 
 	case autoRefreshMsg:
+		if msg.gen != 0 && msg.gen != m.refreshGen {
+			return m, m.scheduleAutoRefreshAt(msg.gen)
+		}
+		m.RefreshStartedAt = time.Now()
 		cmds := []tea.Cmd{m.scheduleAutoRefreshCmd()}
 		if m.canAutoRefresh() {
 			m.Loading = true
@@ -116,7 +132,9 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.Loading = false
 		if msg.err != nil {
 			m.ErrMsg = msg.err.Error()
-			return m, nil
+			m.statusClearGen++
+			gen := m.statusClearGen
+			return m, clearStatusAfter(statusMessageDuration, gen)
 		}
 		m.Info = msg.info
 		return m, nil
@@ -128,51 +146,131 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.Loading = false
 		if msg.err != nil {
 			m.ErrMsg = msg.err.Error()
-			return m, nil
+			m.statusClearGen++
+			gen := m.statusClearGen
+			return m, clearStatusAfter(statusMessageDuration, gen)
 		}
 		m.ScanCursor = msg.cursor
 		if msg.append {
 			m.Keys = append(m.Keys, msg.keys...)
+			m.sortKeys()
 			return m, nil
 		}
 		m.Keys = msg.keys
+		m.sortKeys()
 		cursor := 0
-		if m.SelectedKey != "" {
-			for i, k := range m.Keys {
-				if k == m.SelectedKey {
+		foundSelected := false
+		if m.SelectedNodePath != "" {
+			for i, node := range m.VisibleNodes {
+				if node.fullPath == m.SelectedNodePath {
 					cursor = i
+					foundSelected = true
 					break
 				}
 			}
 		}
+		if !foundSelected {
+			if m.KeyCursor >= len(m.VisibleNodes) {
+				cursor = max(0, len(m.VisibleNodes)-1)
+			} else {
+				cursor = m.KeyCursor
+			}
+		}
 		m.KeyCursor = cursor
-		m.KeyScroll = 0
 		m.adjustKeyScroll()
-		if len(m.Keys) > 0 {
-			m.SelectedKey = m.Keys[m.KeyCursor]
-			m.Loading = true
-			return m, loadKeyDetail(m.Client, m.SelectedKey)
+		if len(m.VisibleNodes) > 0 {
+			node := m.VisibleNodes[m.KeyCursor]
+			m.SelectedNodePath = node.fullPath
+			if !node.isFolder {
+				m.SelectedKey = node.fullPath
+				m.detailGen++
+				m.detailRetryCount = 0
+				m.DetailTotal = -1
+				m.DetailLoaded = 0
+				m.Loading = true
+				return m, loadKeySummaryFn(m.Client, m.SelectedKey, m.detailGen)
+			}
 		}
 		m.SelectedKey = ""
 		m.KeyDetail = nil
 		return m, nil
 
-	case keyDetailMsg:
-		m.Loading = false
-		if msg.err != nil {
-			m.ErrMsg = msg.err.Error()
+	case keySummaryMsg:
+		if msg.gen != m.detailGen || msg.key != m.SelectedKey {
 			return m, nil
 		}
-		m.KeyDetail = msg.detail
-		m.DetailCursor = 0
-		m.DetailScroll = 0
+		if msg.err != nil {
+			m.Loading = false
+			return m, m.handleDetailError(msg.err.Error())
+		}
+		m.Loading = false
+		if m.detailRetryCount > 0 {
+			m.ErrMsg = ""
+		}
+		m.DetailTotal = msg.summary.Total
+		if msg.summary.Meta.Type == "string" ||
+			msg.summary.Total <= 0 ||
+			int(msg.summary.Total) <= detailChunkSize {
+			m.DetailLoaded = int(detailTotalOrZero(m.DetailTotal, msg.summary.Meta.Type))
+			m.detailChunkPending = false
+			m.Loading = true
+			return m, loadKeyDetailFn(m.Client, msg.summary.Meta.Key, -1, 0, m.detailGen, false)
+		}
+		m.DetailLoaded = 0
+		m.detailChunkPending = false
+		m.Loading = true
+		return m, loadKeyDetailFn(m.Client, msg.summary.Meta.Key, 0, detailChunkSize, m.detailGen, false)
+
+	case keyDetailMsg:
+		if msg.gen != m.detailGen || msg.key != m.SelectedKey {
+			return m, nil
+		}
+		if msg.err != nil {
+			m.Loading = false
+			m.detailChunkPending = false
+			return m, m.handleDetailError(msg.err.Error())
+		}
+		m.Loading = false
+		m.detailChunkPending = false
+		if m.detailRetryCount > 0 {
+			m.ErrMsg = ""
+		}
+		if !msg.chunk {
+			prevCursor := m.DetailSearchCursor
+			sameKey := m.KeyDetail != nil &&
+				m.KeyDetail.Meta.Key == msg.detail.Meta.Key
+			m.KeyDetail = msg.detail
+			m.DetailCursor = 0
+			m.DetailScroll = 0
+			m.DetailSearchFocus = false
+			m.DetailSearchInput.Blur()
+			m.DetailLoaded = compositeLoadedCount(msg.detail)
+			if m.DetailSearchInput.Value() != "" {
+				m.applyDetailSearch(prevCursor, sameKey)
+			}
+			return m, nil
+		}
+		mergeChunkIntoDetail(m.KeyDetail, msg.detail, msg.appendOff)
+		m.DetailLoaded = compositeLoadedCount(m.KeyDetail)
 		return m, nil
+
+	case detailDebounceMsg:
+		if msg.gen != m.detailGen || msg.key != m.SelectedKey {
+			return m, nil
+		}
+		if m.Client == nil {
+			return m, nil
+		}
+		m.Loading = true
+		return m, loadKeySummaryFn(m.Client, msg.key, msg.gen)
 
 	case actionDoneMsg:
 		m.Loading = false
 		if msg.err != nil {
 			m.ErrMsg = msg.err.Error()
-			return m, nil
+			m.statusClearGen++
+			gen := m.statusClearGen
+			return m, clearStatusAfter(statusMessageDuration, gen)
 		}
 		m.ErrMsg = ""
 		statusCmd := m.statusClearCmd(msg.status)
@@ -199,13 +297,27 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.Screen = ScreenBrowser
 			m.blurEditInputs()
 			if m.EditMode == editRefreshInterval {
-				return m, tea.Batch(m.scheduleAutoRefreshCmd(), statusCmd)
+				m.RefreshStartedAt = time.Now()
+				cmds := []tea.Cmd{}
+				if m.Client != nil {
+					m.Loading = true
+					cmds = append(cmds, m.refreshDataCmd()...)
+				}
+				if sched := m.scheduleAutoRefreshCmd(); sched != nil {
+					cmds = append(cmds, sched)
+				}
+				cmds = append(cmds, statusCmd)
+				return m, tea.Batch(cmds...)
 			}
 			if (m.EditMode == editNewKey || m.EditMode == editExistingKey) && msg.reload && m.Client != nil {
 				return m, tea.Batch(loadInfo(m.Client), m.rescanKeysCmd(), statusCmd)
 			}
 			if msg.reload && m.Client != nil && m.SelectedKey != "" {
-				return m, tea.Batch(loadKeyDetail(m.Client, m.SelectedKey), statusCmd)
+				m.detailGen++
+				m.detailRetryCount = 0
+				m.DetailTotal = -1
+				m.DetailLoaded = 0
+				return m, tea.Batch(loadKeySummaryFn(m.Client, m.SelectedKey, m.detailGen), statusCmd)
 			}
 			return m, statusCmd
 		}
@@ -215,7 +327,11 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		if msg.reload && m.Screen == ScreenBrowser && m.Client != nil && m.SelectedKey != "" {
 			m.Loading = true
-			return m, tea.Batch(loadKeyDetail(m.Client, m.SelectedKey), statusCmd)
+			m.detailGen++
+			m.detailRetryCount = 0
+			m.DetailTotal = -1
+			m.DetailLoaded = 0
+			return m, tea.Batch(loadKeySummaryFn(m.Client, m.SelectedKey, m.detailGen), statusCmd)
 		}
 		return m, statusCmd
 	}
@@ -231,6 +347,12 @@ func (m *Model) inputFocused() bool {
 		return true
 	}
 	if m.Screen == ScreenBrowser && m.SearchFocus {
+		return true
+	}
+	if m.Screen == ScreenBrowser && m.DetailSearchFocus {
+		return true
+	}
+	if m.Screen == ScreenConfirm && m.ConfirmAction == confirmFlushDB {
 		return true
 	}
 	return false
@@ -262,7 +384,18 @@ func (m *Model) handleInputKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.blurEditInputs()
 			return m, nil
 		}
+	case ScreenConfirm:
+		if m.ConfirmAction == confirmFlushDB && m.matchAction(actionConfirmNo, key) {
+			m.Screen = m.PrevScreen
+			m.ConfirmAction = confirmNone
+			return m, nil
+		}
 	case ScreenBrowser:
+		if m.DetailSearchFocus && m.matchAction(actionBrowserFilterCancel, key) {
+			m.DetailSearchFocus = false
+			m.DetailSearchInput.Blur()
+			return m, nil
+		}
 		if m.SearchFocus && m.matchAction(actionBrowserFilterCancel, key) {
 			m.SearchFocus = false
 			m.SearchInput.Blur()
@@ -284,7 +417,41 @@ func (m *Model) handleInputKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m.updateElementTextareaInput(msg)
 		}
 		return m.updateEditInput(msg)
+	case ScreenConfirm:
+		if m.ConfirmAction == confirmFlushDB {
+			var cmd tea.Cmd
+			m.ConfirmInput, cmd = m.ConfirmInput.Update(msg)
+			if m.matchAction(actionBrowserFilterApply, key) {
+				profileName := m.Client.Profile().Name
+				if m.ConfirmInput.Value() == profileName {
+					m.Loading = true
+					m.Screen = ScreenBrowser
+					m.ConfirmAction = confirmNone
+					return m, tea.Batch(cmd, flushDB(m.Client))
+				}
+				m.ErrMsg = "profile name does not match"
+				m.statusClearGen++
+				gen := m.statusClearGen
+				return m, tea.Batch(cmd, clearStatusAfter(statusMessageDuration, gen))
+			}
+			return m, cmd
+		}
 	case ScreenBrowser:
+		if m.DetailSearchFocus {
+			var cmd tea.Cmd
+			m.DetailSearchInput, cmd = m.DetailSearchInput.Update(msg)
+			if m.matchAction(actionBrowserFilterApply, key) {
+				m.DetailSearchFocus = false
+				m.DetailSearchInput.Blur()
+				count := m.applyDetailSearch(0, false)
+				msg := detailSearchStatus(count)
+				m.Status = msg
+				m.statusClearGen++
+				gen := m.statusClearGen
+				return m, tea.Batch(cmd, clearStatusAfter(statusMessageDuration, gen))
+			}
+			return m, cmd
+		}
 		var cmd tea.Cmd
 		m.SearchInput, cmd = m.SearchInput.Update(msg)
 		if m.matchAction(actionBrowserFilterApply, key) {
@@ -317,12 +484,171 @@ func (m *Model) applySearchPattern() (*Model, tea.Cmd) {
 	return m, scanKeys(m.Client, 0, m.ScanPattern, false, m.scanGen)
 }
 
-func (m *Model) handleKeyPress(key string) (tea.Model, tea.Cmd) {
+func (m *Model) applyDetailSearch(prevCursor int, preserveCursor bool) int {
+	if m.KeyDetail == nil {
+		m.DetailSearchMatches = nil
+		m.DetailSearchCursor = -1
+		return 0
+	}
+	query := m.DetailSearchInput.Value()
+	if query == "" {
+		m.DetailSearchMatches = nil
+		m.DetailSearchCursor = -1
+		return 0
+	}
+	matches, count := computeDetailSearchMatches(m.KeyDetail, query)
+	m.DetailSearchMatches = matches
+	if len(matches) > 0 {
+		target := 0
+		switch {
+		case preserveCursor && prevCursor >= 0 && prevCursor < len(matches):
+			target = prevCursor
+		case preserveCursor && prevCursor >= len(matches):
+			target = len(matches) - 1
+		}
+		m.DetailSearchCursor = target
+		m.jumpToDetailSearchMatch(target)
+	} else {
+		m.DetailSearchCursor = -1
+	}
+	return count
+}
+
+func computeDetailSearchMatches(d *store.KeyDetail, query string) (matches []int, count int) {
+	if query == "" {
+		return nil, 0
+	}
+	q := strings.ToLower(query)
+	switch d.Meta.Type {
+	case "string":
+		haystack := strings.ToLower(sanitizeDetailRow(d.String))
+		count = strings.Count(haystack, q)
+		if count == 0 {
+			return nil, 0
+		}
+		matches = make([]int, 0, count)
+		cursor := 0
+		for {
+			idx := strings.Index(haystack[cursor:], q)
+			if idx < 0 {
+				break
+			}
+			start := cursor + idx
+			matches = append(matches, start)
+			cursor = start + len(q)
+		}
+		return matches, count
+	case "hash":
+		fields := hashFields(d.Hash)
+		for i, f := range fields {
+			if strings.Contains(strings.ToLower(f), q) || strings.Contains(strings.ToLower(d.Hash[f]), q) {
+				count++
+				matches = append(matches, i)
+			}
+		}
+	case "list":
+		for i, v := range d.List {
+			if strings.Contains(strings.ToLower(v), q) {
+				count++
+				matches = append(matches, i)
+			}
+		}
+	case "set":
+		for i, v := range d.Set {
+			if strings.Contains(strings.ToLower(v), q) {
+				count++
+				matches = append(matches, i)
+			}
+		}
+	case "zset":
+		for i, z := range d.ZSet {
+			member, _ := z.Member.(string)
+			if strings.Contains(strings.ToLower(member), q) ||
+				strings.Contains(strings.ToLower(strconv.FormatFloat(z.Score, 'f', -1, 64)), q) {
+				count++
+				matches = append(matches, i)
+			}
+		}
+	case "stream":
+		for i, e := range d.Stream {
+			if strings.Contains(strings.ToLower(e.ID), q) || strings.Contains(strings.ToLower(formatStreamEntry(e)), q) {
+				count++
+				matches = append(matches, i)
+			}
+		}
+	}
+	return matches, count
+}
+
+func (m *Model) jumpToDetailSearchMatch(idxInMatches int) {
+	if m.KeyDetail == nil || idxInMatches < 0 || idxInMatches >= len(m.DetailSearchMatches) {
+		return
+	}
+	d := m.KeyDetail
+	pos := m.DetailSearchMatches[idxInMatches]
+	if d.Meta.Type == "string" {
+		_, rightW := m.browserPanelWidths()
+		panelW := rightW - panelChromeCols
+		if panelW < 1 {
+			panelW = 1
+		}
+		visible := max(1, m.browserContentHeight()-4)
+		maxW := max(8, panelW-4)
+		chunkIdx, _ := chunkPositionForByteOffset(d.String, maxW, pos)
+		bodyVisible := max(1, visible-1)
+		limit := stringDetailScrollLimit(d.String, panelW, visible)
+		target := chunkIdx - bodyVisible/2
+		if target < 0 {
+			target = 0
+		}
+		if target > limit {
+			target = limit
+		}
+		m.DetailScroll = target
+		return
+	}
+	m.DetailCursor = pos
+	m.adjustDetailScroll()
+}
+
+func (m *Model) cycleDetailMatch(delta int) {
+	n := len(m.DetailSearchMatches)
+	if n == 0 {
+		return
+	}
+	next := (m.DetailSearchCursor + delta) % n
+	if next < 0 {
+		next += n
+	}
+	m.DetailSearchCursor = next
+	m.jumpToDetailSearchMatch(next)
+}
+
+func (m *Model) detailSearchNavStatus() string {
+	n := len(m.DetailSearchMatches)
+	if n == 0 {
+		return "no matches"
+	}
+	return fmt.Sprintf("match %d/%d", m.DetailSearchCursor+1, n)
+}
+
+func detailSearchStatus(count int) string {
+	switch count {
+	case 0:
+		return "no matches"
+	case 1:
+		return "1 match"
+	default:
+		return fmt.Sprintf("%d matches", count)
+	}
+}
+
+func (m *Model) handleKeyPress(key string, msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch m.Screen {
 	case ScreenProfiles:
 		return m.handleProfilesKeys(key)
 	case ScreenBrowser:
-		return m.handleBrowserKeys(key)
+		return m.handleBrowserKeys(key, msg)
 	case ScreenKeyEdit:
 		return m, nil
 	case ScreenConfirm:
@@ -373,7 +699,71 @@ func (m *Model) handleProfilesKeys(key string) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-func (m *Model) handleBrowserKeys(key string) (tea.Model, tea.Cmd) {
+func (m *Model) handleBrowserKeys(key string, msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	if key == "/" && !m.SearchFocus && !m.DetailSearchFocus &&
+		m.PanelFocus == panelDetail && m.KeyDetail != nil {
+		m.DetailSearchFocus = true
+		m.DetailSearchInput.SetValue("")
+		m.DetailSearchInput.Focus()
+		return m, nil
+	}
+	if m.PanelFocus == panelDetail && m.KeyDetail != nil &&
+		!m.DetailSearchFocus && m.DetailSearchInput.Value() != "" &&
+		len(m.DetailSearchMatches) > 0 &&
+		msg.Type == tea.KeyRunes && len(msg.Runes) == 1 {
+		switch msg.Runes[0] {
+		case 'n':
+			m.cycleDetailMatch(1)
+			return m, m.statusClearCmd(m.detailSearchNavStatus())
+		case 'N':
+			m.cycleDetailMatch(-1)
+			return m, m.statusClearCmd(m.detailSearchNavStatus())
+		}
+	}
+	if m.PanelFocus == panelKeys && !m.SearchFocus {
+		switch key {
+		case "enter":
+			if len(m.VisibleNodes) > 0 {
+				node := m.VisibleNodes[m.KeyCursor]
+				m.SelectedNodePath = node.fullPath
+				if node.isFolder {
+					m.toggleFolder(m.KeyCursor)
+					m.adjustKeyScroll()
+					return m, nil
+				}
+			}
+		case "right":
+			if len(m.VisibleNodes) > 0 {
+				node := m.VisibleNodes[m.KeyCursor]
+				m.SelectedNodePath = node.fullPath
+				if node.isFolder && !m.ExpandedFolders[node.fullPath] {
+					m.toggleFolder(m.KeyCursor)
+					m.adjustKeyScroll()
+					return m, nil
+				}
+			}
+		case "left":
+			if len(m.VisibleNodes) > 0 {
+				node := m.VisibleNodes[m.KeyCursor]
+				m.SelectedNodePath = node.fullPath
+				if node.isFolder && m.ExpandedFolders[node.fullPath] {
+					m.toggleFolder(m.KeyCursor)
+					m.adjustKeyScroll()
+					return m, nil
+				}
+				if node.depth > 0 {
+					for i := m.KeyCursor - 1; i >= 0; i-- {
+						if m.VisibleNodes[i].depth < node.depth {
+							m.KeyCursor = i
+							m.SelectedNodePath = m.VisibleNodes[i].fullPath
+							m.adjustKeyScroll()
+							return m, nil
+						}
+					}
+				}
+			}
+		}
+	}
 	switch {
 	case m.matchAction(actionBrowserDisconnect, key):
 		if m.Client != nil {
@@ -394,12 +784,12 @@ func (m *Model) handleBrowserKeys(key string) (tea.Model, tea.Cmd) {
 		if m.PanelFocus == panelKeys {
 			return m.moveKeyCursor(1)
 		}
-		m.detailMove(1)
+		return m.detailMove(1)
 	case m.matchAction(actionBrowserUp, key):
 		if m.PanelFocus == panelKeys {
 			return m.moveKeyCursor(-1)
 		}
-		m.detailMove(-1)
+		return m.detailMove(-1)
 	case m.matchAction(actionBrowserFilter, key):
 		m.PanelFocus = panelKeys
 		m.SearchFocus = true
@@ -419,7 +809,7 @@ func (m *Model) handleBrowserKeys(key string) (tea.Model, tea.Cmd) {
 		}
 	case m.matchAction(actionBrowserRefresh, key):
 		m.Loading = true
-		return m, tea.Batch(append(m.refreshDataCmd(), m.scheduleAutoRefreshCmd())...)
+		return m, tea.Batch(m.refreshDataCmd()...)
 	case m.matchAction(actionBrowserAutoRefresh, key):
 		sec := config.DefaultRefreshIntervalSec
 		if m.Config != nil {
@@ -427,10 +817,14 @@ func (m *Model) handleBrowserKeys(key string) (tea.Model, tea.Cmd) {
 		}
 		m.EditMode = editRefreshInterval
 		m.EditInput.SetValue(strconv.Itoa(sec))
-		m.EditInput.Placeholder = "seconds (0=off)"
+		m.EditInput.Placeholder = "seconds (0=off, min 5)"
 		m.EditInput.Focus()
 		m.PrevScreen = ScreenBrowser
 		m.Screen = ScreenKeyEdit
+	case m.matchAction(actionBrowserSortOrder, key):
+		m.SortOrder = (m.SortOrder + 1) % 3
+		m.sortKeys()
+		return m, m.statusClearCmd(m.sortOrderLabel())
 	case m.matchAction(actionBrowserEdit, key) || m.matchAction(actionBrowserDetailEdit, key):
 		if m.PanelFocus == panelDetail && m.KeyDetail != nil {
 			return m.startDetailEdit()
@@ -467,35 +861,55 @@ func (m *Model) handleBrowserKeys(key string) (tea.Model, tea.Cmd) {
 		m.ConfirmTarget = ""
 		m.PrevScreen = ScreenBrowser
 		m.Screen = ScreenConfirm
+		m.ConfirmInput.SetValue("")
+		m.ConfirmInput.Focus()
+		return m, textinput.Blink
 	}
 	return m, nil
 }
 
 func (m *Model) moveKeyCursor(delta int) (tea.Model, tea.Cmd) {
-	if len(m.Keys) == 0 {
+	count := len(m.VisibleNodes)
+	if count == 0 {
+		count = len(m.Keys)
+	}
+	if count == 0 {
 		return m, nil
 	}
-	next := clamp(m.KeyCursor+delta, 0, len(m.Keys)-1)
+	next := clamp(m.KeyCursor+delta, 0, count-1)
 	if next == m.KeyCursor {
 		return m, nil
 	}
 	m.KeyCursor = next
 	m.adjustKeyScroll()
 	m.PanelFocus = panelKeys
-	m.SelectedKey = m.Keys[m.KeyCursor]
+	if len(m.VisibleNodes) > 0 {
+		node := m.VisibleNodes[m.KeyCursor]
+		m.SelectedNodePath = node.fullPath
+		if node.isFolder {
+			return m, nil
+		}
+		m.SelectedKey = node.fullPath
+	} else {
+		m.SelectedKey = m.Keys[m.KeyCursor]
+		m.SelectedNodePath = m.SelectedKey
+	}
+	m.detailGen++
+	m.detailRetryCount = 0
 	m.Loading = true
-	return m, loadKeyDetail(m.Client, m.SelectedKey)
+	return m, scheduleDetailDebounce(m.SelectedKey, m.detailGen)
 }
 
 func (m *Model) handleConfirmKeys(key string) (tea.Model, tea.Cmd) {
 	switch {
 	case m.matchAction(actionConfirmYes, key):
+		if m.ConfirmAction == confirmFlushDB {
+			return m, nil
+		}
 		m.Loading = true
 		switch m.ConfirmAction {
 		case confirmDeleteKey:
 			return m, deleteKey(m.Client, m.ConfirmTarget)
-		case confirmFlushDB:
-			return m, flushDB(m.Client)
 		case confirmDeleteProfile:
 			return m, deleteProfile(m.Config, m.ConfirmTarget)
 		}
@@ -516,7 +930,9 @@ func (m *Model) startEdit() (tea.Model, tea.Cmd) {
 		return m, m.focusNewKeyField(newKeyFieldTTL)
 	default:
 		m.ErrMsg = fmt.Sprintf("type %s is not editable", m.KeyDetail.Meta.Type)
-		return m, nil
+		m.statusClearGen++
+		gen := m.statusClearGen
+		return m, clearStatusAfter(statusMessageDuration, gen)
 	}
 }
 
@@ -527,9 +943,11 @@ func (m *Model) updateEditInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		switch m.EditMode {
 		case editRefreshInterval:
 			sec, err := strconv.Atoi(value)
-			if err != nil || sec < 0 {
-				m.ErrMsg = "seconds must be >= 0"
-				return m, nil
+			if err != nil || sec < 0 || (sec > 0 && sec < 5) {
+				m.ErrMsg = "seconds must be 0 (off) or >= 5"
+				m.statusClearGen++
+				gen := m.statusClearGen
+				return m, clearStatusAfter(statusMessageDuration, gen)
 			}
 			m.Loading = true
 			return m, saveRefreshInterval(m.Config, sec)
@@ -626,7 +1044,9 @@ func (m *Model) submitTTLModal() (tea.Model, tea.Cmd) {
 	ttl, err := store.ParseTTLInput(m.NewKeyTTL.Value())
 	if err != nil {
 		m.ErrMsg = err.Error()
-		return m, nil
+		m.statusClearGen++
+		gen := m.statusClearGen
+		return m, clearStatusAfter(statusMessageDuration, gen)
 	}
 	m.Loading = true
 	return m, setTTL(m.Client, m.SelectedKey, ttl)
@@ -702,12 +1122,16 @@ func (m *Model) submitKeyForm() (tea.Model, tea.Cmd) {
 	key := strings.TrimSpace(m.NewKeyName.Value())
 	if key == "" {
 		m.ErrMsg = "key required"
-		return m, nil
+		m.statusClearGen++
+		gen := m.statusClearGen
+		return m, clearStatusAfter(statusMessageDuration, gen)
 	}
 	ttl, err := store.ParseTTLInput(m.NewKeyTTL.Value())
 	if err != nil {
 		m.ErrMsg = err.Error()
-		return m, nil
+		m.statusClearGen++
+		gen := m.statusClearGen
+		return m, clearStatusAfter(statusMessageDuration, gen)
 	}
 	renameFrom := ""
 	if m.EditMode == editExistingKey {
@@ -715,7 +1139,9 @@ func (m *Model) submitKeyForm() (tea.Model, tea.Cmd) {
 		body, err := store.ParseKeyBody(m.KeyFormType, m.NewKeyValue.Value())
 		if err != nil {
 			m.ErrMsg = err.Error()
-			return m, nil
+			m.statusClearGen++
+			gen := m.statusClearGen
+			return m, clearStatusAfter(statusMessageDuration, gen)
 		}
 		m.SelectedKey = key
 		m.Loading = true
@@ -725,7 +1151,9 @@ func (m *Model) submitKeyForm() (tea.Model, tea.Cmd) {
 	body, err := store.ParseKeyBody(keyType, m.NewKeyValue.Value())
 	if err != nil {
 		m.ErrMsg = err.Error()
-		return m, nil
+		m.statusClearGen++
+		gen := m.statusClearGen
+		return m, clearStatusAfter(statusMessageDuration, gen)
 	}
 	m.KeyFormType = keyType
 	m.SelectedKey = key
@@ -798,7 +1226,9 @@ func (m *Model) updateFormInputs(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		p, err := profileFromForm(m.FormInputs)
 		if err != nil {
 			m.ErrMsg = err.Error()
-			return m, nil
+			m.statusClearGen++
+			gen := m.statusClearGen
+			return m, clearStatusAfter(statusMessageDuration, gen)
 		}
 		if m.FormEditing && m.Config != nil {
 			if existing, _ := m.Config.Find(m.FormOriginal); existing != nil {
@@ -842,16 +1272,28 @@ func (m *Model) adjustKeyScroll() {
 	}
 }
 
-func (m *Model) detailMove(delta int) {
+func (m *Model) detailMove(delta int) (tea.Model, tea.Cmd) {
 	if m.KeyDetail == nil {
-		return
+		return m, nil
+	}
+	if m.KeyDetail.Meta.Type == "string" {
+		_, rightW := m.browserPanelWidths()
+		panelW := rightW - panelChromeCols
+		if panelW < 1 {
+			panelW = 1
+		}
+		visible := max(1, m.browserContentHeight()-4)
+		limit := stringDetailScrollLimit(m.KeyDetail.String, panelW, visible)
+		m.DetailScroll = clamp(m.DetailScroll+delta, 0, limit)
+		return m, nil
 	}
 	max := detailItemCount(m.KeyDetail) - 1
 	if max < 0 {
-		return
+		return m, nil
 	}
 	m.DetailCursor = clamp(m.DetailCursor+delta, 0, max)
 	m.adjustDetailScroll()
+	return m, m.maybeLoadMoreDetail()
 }
 
 func (m *Model) adjustDetailScroll() {
@@ -881,9 +1323,119 @@ func detailItemCount(d *store.KeyDetail) int {
 	}
 }
 
+func detailTotalOrZero(total int64, keyType string) int64 {
+	if keyType == "string" || keyType == "" {
+		return 0
+	}
+	if total < 0 {
+		return 0
+	}
+	return total
+}
+
+func compositeLoadedCount(d *store.KeyDetail) int {
+	if d == nil {
+		return 0
+	}
+	return detailItemCount(d)
+}
+
+func mergeChunkIntoDetail(dst, src *store.KeyDetail, offset int) {
+	if dst == nil || src == nil {
+		return
+	}
+	switch dst.Meta.Type {
+	case "hash":
+		if dst.Hash == nil {
+			dst.Hash = make(map[string]string, len(src.Hash))
+		}
+		for k, v := range src.Hash {
+			dst.Hash[k] = v
+		}
+	case "list":
+		dst.List = append(dst.List, src.List...)
+	case "set":
+		dst.Set = append(dst.Set, src.Set...)
+	case "zset":
+		dst.ZSet = append(dst.ZSet, src.ZSet...)
+	case "stream":
+		dst.Stream = append(dst.Stream, src.Stream...)
+	}
+}
+
+func (m *Model) handleDetailError(errMsg string) tea.Cmd {
+	if m.Client == nil || m.SelectedKey == "" {
+		m.ErrMsg = errMsg
+		m.statusClearGen++
+		gen := m.statusClearGen
+		return clearStatusAfter(statusMessageDuration, gen)
+	}
+	if m.detailRetryCount >= 1 || !looksLikeRetriableDetailError(errMsg) {
+		m.ErrMsg = errMsg
+		m.detailRetryCount = 0
+		m.statusClearGen++
+		gen := m.statusClearGen
+		return clearStatusAfter(statusMessageDuration, gen)
+	}
+	m.detailRetryCount++
+	m.ErrMsg = errMsg + " (retrying)"
+	m.statusClearGen++
+	gen := m.statusClearGen
+	m.detailGen++
+	m.detailChunkPending = false
+	m.DetailTotal = -1
+	m.DetailLoaded = 0
+	m.Loading = true
+	return tea.Batch(loadKeySummaryFn(m.Client, m.SelectedKey, m.detailGen), clearStatusAfter(statusMessageDuration, gen))
+}
+
+func looksLikeRetriableDetailError(msg string) bool {
+	return strings.Contains(msg, "WRONGTYPE") ||
+		strings.Contains(msg, "LOADING")
+}
+
+func (m *Model) maybeLoadMoreDetail() tea.Cmd {
+	if m.Client == nil || m.KeyDetail == nil {
+		return nil
+	}
+	if m.detailChunkPending {
+		return nil
+	}
+	if !compositeKeyType(m.KeyDetail.Meta.Type) {
+		return nil
+	}
+	loaded := compositeLoadedCount(m.KeyDetail)
+	if int64(loaded) >= m.DetailTotal {
+		return nil
+	}
+	if m.DetailCursor < loaded-detailChunkLookahead {
+		return nil
+	}
+	m.detailChunkPending = true
+	m.Loading = true
+	return loadKeyDetailFn(m.Client, m.SelectedKey, loaded, detailChunkSize, m.detailGen, true)
+}
+
+func stringDetailScrollLimit(value string, panelW, listH int) int {
+	if listH < 1 {
+		listH = 1
+	}
+	maxW := max(8, panelW-4)
+	chunks := chunkString(value, maxW)
+	bodyVisible := max(1, listH-1)
+	limit := len(chunks) - bodyVisible
+	if limit < 0 {
+		return 0
+	}
+	return limit
+}
+
 const (
 	copiedToClipboardStatus = "copied to clipboard"
 	statusMessageDuration   = 3 * time.Second
+	detailDebounceDuration  = 80 * time.Millisecond
+	detailChunkSize         = 200
+	detailChunkLookahead    = 50
 )
 
 func (m *Model) statusClearCmd(msg string) tea.Cmd {
@@ -903,11 +1455,15 @@ func (m *Model) copyDetailValue() (tea.Model, tea.Cmd) {
 	text, ok := m.copyableValueText()
 	if !ok {
 		m.ErrMsg = "nothing to copy"
-		return m, nil
+		m.statusClearGen++
+		gen := m.statusClearGen
+		return m, clearStatusAfter(statusMessageDuration, gen)
 	}
 	if err := writeSystemClipboard(text); err != nil {
 		m.ErrMsg = err.Error()
-		return m, nil
+		m.statusClearGen++
+		gen := m.statusClearGen
+		return m, clearStatusAfter(statusMessageDuration, gen)
 	}
 	m.ErrMsg = ""
 	return m, m.statusClearCmd(copiedToClipboardStatus)
@@ -995,7 +1551,7 @@ func (m *Model) copyableValueText() (string, bool) {
 }
 
 func (m *Model) elementEditUsesTextarea() bool {
-	return m.KeyFormType == "stream"
+	return m.EditMode == editElement || m.EditMode == editElementAdd
 }
 
 func (m *Model) openElementEdit(mode editMode) tea.Cmd {
@@ -1003,11 +1559,8 @@ func (m *Model) openElementEdit(mode editMode) tea.Cmd {
 	m.PrevScreen = ScreenBrowser
 	m.Screen = ScreenKeyEdit
 	m.blurEditInputs()
-	if m.elementEditUsesTextarea() {
-		m.syncNewKeyLayout()
-		return m.NewKeyValue.Focus()
-	}
-	return m.EditInput.Focus()
+	m.syncNewKeyLayout()
+	return m.NewKeyValue.Focus()
 }
 
 func (m *Model) startDetailEdit() (tea.Model, tea.Cmd) {
@@ -1016,54 +1569,65 @@ func (m *Model) startDetailEdit() (tea.Model, tea.Cmd) {
 	}
 	d := m.KeyDetail
 	m.KeyFormType = d.Meta.Type
+	m.NewKeyValue.Reset()
 	switch d.Meta.Type {
 	case "string":
-		m.EditInput.SetValue(d.String)
-		m.EditInput.Placeholder = "value"
-		m.EditMode = editElement
+		m.NewKeyValue.SetValue(d.String)
+		m.NewKeyValue.Placeholder = "value"
 		return m, m.openElementEdit(editElement)
 	case "hash":
 		if len(d.Hash) == 0 {
 			m.ErrMsg = "no fields to edit"
-			return m, nil
+			m.statusClearGen++
+			gen := m.statusClearGen
+			return m, clearStatusAfter(statusMessageDuration, gen)
 		}
 		field := hashFields(d.Hash)[m.DetailCursor]
 		m.EditField = field
-		m.EditInput.SetValue(field + "=" + d.Hash[field])
-		m.EditInput.Placeholder = "field=value"
+		m.NewKeyValue.SetValue(d.Hash[field])
+		m.NewKeyValue.Placeholder = "value (field: " + field + ")"
 		return m, m.openElementEdit(editElement)
 	case "list":
 		if len(d.List) == 0 {
 			m.ErrMsg = "no items to edit"
-			return m, nil
+			m.statusClearGen++
+			gen := m.statusClearGen
+			return m, clearStatusAfter(statusMessageDuration, gen)
 		}
-		m.EditInput.SetValue(d.List[m.DetailCursor])
-		m.EditInput.Placeholder = "item value"
+		m.NewKeyValue.SetValue(d.List[m.DetailCursor])
+		m.NewKeyValue.Placeholder = "item value"
 		return m, m.openElementEdit(editElement)
 	case "set":
 		if len(d.Set) == 0 {
 			m.ErrMsg = "no members to edit"
-			return m, nil
+			m.statusClearGen++
+			gen := m.statusClearGen
+			return m, clearStatusAfter(statusMessageDuration, gen)
 		}
-		m.EditField = d.Set[m.DetailCursor]
-		m.EditInput.SetValue(m.EditField)
-		m.EditInput.Placeholder = "member"
+		member := d.Set[m.DetailCursor]
+		m.EditField = member
+		m.NewKeyValue.SetValue(member)
+		m.NewKeyValue.Placeholder = "member"
 		return m, m.openElementEdit(editElement)
 	case "zset":
 		if len(d.ZSet) == 0 {
 			m.ErrMsg = "no members to edit"
-			return m, nil
+			m.statusClearGen++
+			gen := m.statusClearGen
+			return m, clearStatusAfter(statusMessageDuration, gen)
 		}
 		z := d.ZSet[m.DetailCursor]
 		member, _ := z.Member.(string)
 		m.EditField = member
-		m.EditInput.SetValue(store.FormatZSetLine(z.Score, member))
-		m.EditInput.Placeholder = "score<TAB>member"
+		m.NewKeyValue.SetValue(strconv.FormatFloat(z.Score, 'g', -1, 64) + " " + member)
+		m.NewKeyValue.Placeholder = "score<TAB>member"
 		return m, m.openElementEdit(editElement)
 	case "stream":
 		if len(d.Stream) == 0 {
 			m.ErrMsg = "no entries to edit"
-			return m, nil
+			m.statusClearGen++
+			gen := m.statusClearGen
+			return m, clearStatusAfter(statusMessageDuration, gen)
 		}
 		entry := d.Stream[m.DetailCursor]
 		m.EditField = entry.ID
@@ -1072,7 +1636,9 @@ func (m *Model) startDetailEdit() (tea.Model, tea.Cmd) {
 		return m, m.openElementEdit(editElement)
 	default:
 		m.ErrMsg = fmt.Sprintf("type %s is not editable", d.Meta.Type)
-		return m, nil
+		m.statusClearGen++
+		gen := m.statusClearGen
+		return m, clearStatusAfter(statusMessageDuration, gen)
 	}
 }
 
@@ -1082,24 +1648,26 @@ func (m *Model) startDetailAdd() (tea.Model, tea.Cmd) {
 	}
 	m.KeyFormType = m.KeyDetail.Meta.Type
 	m.EditField = ""
-	m.EditInput.SetValue("")
+	m.NewKeyValue.Reset()
 	switch m.KeyDetail.Meta.Type {
 	case "hash":
-		m.EditInput.Placeholder = "field=value"
+		m.NewKeyValue.Placeholder = "field=value"
+		return m, m.openElementEdit(editElementAdd)
 	case "list":
-		m.EditInput.Placeholder = "item value"
+		m.NewKeyValue.Placeholder = "item value"
+		return m, m.openElementEdit(editElementAdd)
 	case "set":
-		m.EditInput.Placeholder = "member"
+		m.NewKeyValue.Placeholder = "member"
+		return m, m.openElementEdit(editElementAdd)
 	case "zset":
-		m.EditInput.Placeholder = "score<TAB>member"
+		m.NewKeyValue.Placeholder = "score<TAB>member"
+		return m, m.openElementEdit(editElementAdd)
 	case "stream":
-		m.NewKeyValue.Reset()
 		m.NewKeyValue.Placeholder = "field=value (one per line)"
 		return m, m.openElementEdit(editElementAdd)
 	default:
 		return m, nil
 	}
-	return m, m.openElementEdit(editElementAdd)
 }
 
 func (m *Model) deleteDetailElement() (tea.Model, tea.Cmd) {
@@ -1151,10 +1719,7 @@ func (m *Model) submitElementEdit() (tea.Model, tea.Cmd) {
 	if m.Client == nil || m.KeyDetail == nil {
 		return m, nil
 	}
-	value := strings.TrimSpace(m.EditInput.Value())
-	if m.elementEditUsesTextarea() {
-		value = m.NewKeyValue.Value()
-	}
+	value := m.NewKeyValue.Value()
 	m.Loading = true
 	key := m.SelectedKey
 	switch m.KeyFormType {
@@ -1162,38 +1727,32 @@ func (m *Model) submitElementEdit() (tea.Model, tea.Cmd) {
 		if m.EditMode == editElementAdd {
 			return m, nil
 		}
-		return m, patchStringValue(m.Client, key, value)
+		return m, patchStringValueFn(m.Client, key, value)
 	case "hash":
 		if m.EditMode == editElementAdd {
-			return m, addHashField(m.Client, key, value)
+			return m, addHashFieldFn(m.Client, key, value)
 		}
-		_, fieldValue, err := store.ParseHashFieldLine(value)
-		if err != nil {
-			m.ErrMsg = err.Error()
-			m.Loading = false
-			return m, nil
-		}
-		return m, patchHashField(m.Client, key, m.EditField, fieldValue)
+		return m, patchHashFieldFn(m.Client, key, m.EditField, value)
 	case "list":
 		if m.EditMode == editElementAdd {
-			return m, appendListItem(m.Client, key, value)
+			return m, appendListItemFn(m.Client, key, value)
 		}
-		return m, patchListItem(m.Client, key, m.DetailCursor, value)
+		return m, patchListItemFn(m.Client, key, m.DetailCursor, value)
 	case "set":
 		if m.EditMode == editElementAdd {
-			return m, addSetMember(m.Client, key, value)
+			return m, addSetMemberFn(m.Client, key, value)
 		}
-		return m, replaceSetMember(m.Client, key, m.EditField, value)
+		return m, replaceSetMemberFn(m.Client, key, m.EditField, value)
 	case "zset":
 		if m.EditMode == editElementAdd {
-			return m, addZSetMember(m.Client, key, value)
+			return m, addZSetMemberFn(m.Client, key, value)
 		}
-		return m, replaceZSetMember(m.Client, key, m.EditField, value)
+		return m, replaceZSetMemberFn(m.Client, key, m.EditField, value)
 	case "stream":
 		if m.EditMode == editElementAdd {
-			return m, addStreamEntry(m.Client, key, value)
+			return m, addStreamEntryFn(m.Client, key, value)
 		}
-		return m, replaceStreamEntry(m.Client, key, m.EditField, value)
+		return m, replaceStreamEntryFn(m.Client, key, m.EditField, value)
 	default:
 		m.Loading = false
 		return m, nil
@@ -1215,13 +1774,7 @@ func hashFields(h map[string]string) []string {
 	for k := range h {
 		out = append(out, k)
 	}
-	for i := 0; i < len(out); i++ {
-		for j := i + 1; j < len(out); j++ {
-			if out[j] < out[i] {
-				out[i], out[j] = out[j], out[i]
-			}
-		}
-	}
+	sort.Strings(out)
 	return out
 }
 
@@ -1259,7 +1812,7 @@ func (m *Model) canAutoRefresh() bool {
 	if m.Screen != ScreenBrowser {
 		return false
 	}
-	if m.Loading || m.SearchFocus || m.HelpOpen {
+	if m.Loading || m.SearchFocus || m.DetailSearchFocus || m.HelpOpen {
 		return false
 	}
 	return true
@@ -1276,7 +1829,22 @@ func (m *Model) scheduleAutoRefreshCmd() tea.Cmd {
 	if sec <= 0 {
 		return nil
 	}
-	return scheduleAutoRefresh(time.Duration(sec) * time.Second)
+	m.refreshGen++
+	return scheduleAutoRefresh(time.Duration(sec)*time.Second, m.refreshGen)
+}
+
+func (m *Model) scheduleAutoRefreshAt(gen uint64) tea.Cmd {
+	if m.Client == nil {
+		return nil
+	}
+	sec := config.DefaultRefreshIntervalSec
+	if m.Config != nil {
+		sec = m.Config.GetRefreshIntervalSec()
+	}
+	if sec <= 0 {
+		return nil
+	}
+	return scheduleAutoRefresh(time.Duration(sec)*time.Second, gen)
 }
 
 func (m *Model) rescanKeysCmd() tea.Cmd {
@@ -1284,18 +1852,74 @@ func (m *Model) rescanKeysCmd() tea.Cmd {
 		return nil
 	}
 	m.scanGen++
+	m.RefreshStartedAt = time.Now()
 	return scanKeys(m.Client, 0, m.ScanPattern, false, m.scanGen)
 }
 
 func (m *Model) refreshDataCmd() []tea.Cmd {
 	m.scanGen++
 	gen := m.scanGen
+	m.detailGen++
+	m.detailRetryCount = 0
+	detailGen := m.detailGen
 	cmds := []tea.Cmd{
 		loadInfo(m.Client),
 		scanKeys(m.Client, 0, m.ScanPattern, false, gen),
 	}
 	if m.SelectedKey != "" {
-		cmds = append(cmds, loadKeyDetail(m.Client, m.SelectedKey))
+		cmds = append(cmds, loadKeySummaryFn(m.Client, m.SelectedKey, detailGen))
 	}
 	return cmds
+}
+
+func (m *Model) sortKeys() {
+	switch m.SortOrder {
+	case sortAZ:
+		sort.Slice(m.Keys, func(i, j int) bool {
+			return strings.ToLower(m.Keys[i]) < strings.ToLower(m.Keys[j])
+		})
+	case sortZA:
+		sort.Slice(m.Keys, func(i, j int) bool {
+			return strings.ToLower(m.Keys[i]) > strings.ToLower(m.Keys[j])
+		})
+	}
+	m.TreeRoot = buildKeyTree(m.Keys, m.SortOrder)
+	m.VisibleNodes = flattenTree(m.TreeRoot, m.ExpandedFolders, 0)
+}
+
+func (m *Model) rebuildTree() {
+	m.TreeRoot = buildKeyTree(m.Keys, m.SortOrder)
+	m.VisibleNodes = flattenTree(m.TreeRoot, m.ExpandedFolders, 0)
+}
+
+func (m *Model) toggleFolder(index int) {
+	if index < 0 || index >= len(m.VisibleNodes) {
+		return
+	}
+	node := m.VisibleNodes[index]
+	if !node.isFolder {
+		return
+	}
+	m.ExpandedFolders[node.fullPath] = !m.ExpandedFolders[node.fullPath]
+	m.VisibleNodes = flattenTree(m.TreeRoot, m.ExpandedFolders, 0)
+}
+
+func (m *Model) sortOrderLabel() string {
+	switch m.SortOrder {
+	case sortAZ:
+		return "sort: A→Z"
+	case sortZA:
+		return "sort: Z→A"
+	default:
+		return "sort: original"
+	}
+}
+
+func (m *Model) sortOrderIndicator() string {
+	switch m.SortOrder {
+	case sortZA:
+		return "Z→A"
+	default:
+		return ""
+	}
 }

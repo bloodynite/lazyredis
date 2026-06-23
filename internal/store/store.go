@@ -35,6 +35,11 @@ type KeyMeta struct {
 	TTL  time.Duration
 }
 
+type KeySummary struct {
+	Meta  KeyMeta
+	Total int64
+}
+
 type KeyDetail struct {
 	Meta   KeyMeta
 	String string
@@ -188,9 +193,39 @@ func NormalizeScanPattern(input string) string {
 	return "*" + pattern + "*"
 }
 
+func CaseInsensitivePattern(pattern string) string {
+	var out strings.Builder
+	inClass := false
+	for _, r := range pattern {
+		switch {
+		case r == '[':
+			inClass = true
+			out.WriteRune(r)
+		case r == ']':
+			inClass = false
+			out.WriteRune(r)
+		case inClass || r == '*' || r == '?':
+			out.WriteRune(r)
+		case r >= 'A' && r <= 'Z':
+			out.WriteRune('[')
+			out.WriteRune(r + 32)
+			out.WriteRune(r)
+			out.WriteRune(']')
+		case r >= 'a' && r <= 'z':
+			out.WriteRune('[')
+			out.WriteRune(r)
+			out.WriteRune(r - 32)
+			out.WriteRune(']')
+		default:
+			out.WriteRune(r)
+		}
+	}
+	return out.String()
+}
+
 func (c *Client) ScanKeys(ctx context.Context, cursor uint64, pattern string, count int64) ([]string, uint64, error) {
 	pattern = NormalizeScanPattern(pattern)
-	return c.rdb.Scan(ctx, cursor, pattern, count).Result()
+	return c.rdb.Scan(ctx, cursor, CaseInsensitivePattern(pattern), count).Result()
 }
 
 func (c *Client) KeyMeta(ctx context.Context, key string) (*KeyMeta, error) {
@@ -212,12 +247,13 @@ func (c *Client) KeyMeta(ctx context.Context, key string) (*KeyMeta, error) {
 	return &KeyMeta{Key: key, Type: t, TTL: ttl}, nil
 }
 
-func (c *Client) GetKey(ctx context.Context, key string) (*KeyDetail, error) {
+func (c *Client) GetKey(ctx context.Context, key string, offset, limit int) (*KeyDetail, error) {
 	meta, err := c.KeyMeta(ctx, key)
 	if err != nil {
 		return nil, err
 	}
 	d := &KeyDetail{Meta: *meta}
+	full := offset < 0 || limit <= 0
 	switch meta.Type {
 	case "string":
 		val, err := c.rdb.Get(ctx, key).Result()
@@ -226,46 +262,174 @@ func (c *Client) GetKey(ctx context.Context, key string) (*KeyDetail, error) {
 		}
 		d.String = val
 	case "hash":
-		val, err := c.rdb.HGetAll(ctx, key).Result()
-		if err != nil {
-			return nil, err
-		}
-		d.Hash = val
+		d.Hash = c.loadHashWindow(ctx, key, offset, limit, full)
 	case "list":
-		val, err := c.rdb.LRange(ctx, key, 0, -1).Result()
+		var stop int64 = -1
+		if !full {
+			stop = int64(offset + limit - 1)
+		}
+		val, err := c.rdb.LRange(ctx, key, int64(offset), stop).Result()
 		if err != nil {
 			return nil, err
 		}
 		d.List = val
 	case "set":
-		val, err := c.rdb.SMembers(ctx, key).Result()
-		if err != nil {
-			return nil, err
-		}
-		d.Set = val
+		d.Set = c.loadSetWindow(ctx, key, offset, limit, full)
 	case "zset":
-		val, err := c.rdb.ZRangeWithScores(ctx, key, 0, -1).Result()
+		var stop int64 = -1
+		if !full {
+			stop = int64(offset + limit - 1)
+		}
+		val, err := c.rdb.ZRangeWithScores(ctx, key, int64(offset), stop).Result()
 		if err != nil {
 			return nil, err
 		}
 		d.ZSet = val
 	case "stream":
-		msgs, err := c.rdb.XRange(ctx, key, "-", "+").Result()
-		if err != nil {
-			return nil, err
-		}
-		d.Stream = make([]StreamEntry, 0, len(msgs))
-		for _, msg := range msgs {
-			fields := make(map[string]string, len(msg.Values))
-			for k, v := range msg.Values {
-				fields[k] = fmt.Sprint(v)
-			}
-			d.Stream = append(d.Stream, StreamEntry{ID: msg.ID, Fields: fields})
-		}
+		d.Stream = c.loadStreamWindow(ctx, key, offset, limit, full)
 	default:
 		return nil, fmt.Errorf("unsupported type %s", meta.Type)
 	}
 	return d, nil
+}
+
+func (c *Client) GetKeySummary(ctx context.Context, key string) (*KeySummary, error) {
+	t, err := c.rdb.Type(ctx, key).Result()
+	if err != nil {
+		return nil, err
+	}
+	if t == "none" {
+		return nil, fmt.Errorf("key not found")
+	}
+
+	pipe := c.rdb.Pipeline()
+	ttlCmd := pipe.TTL(ctx, key)
+	var lenCmd *redis.IntCmd
+	switch t {
+	case "string":
+		lenCmd = pipe.StrLen(ctx, key)
+	case "hash":
+		lenCmd = pipe.HLen(ctx, key)
+	case "list":
+		lenCmd = pipe.LLen(ctx, key)
+	case "set":
+		lenCmd = pipe.SCard(ctx, key)
+	case "zset":
+		lenCmd = pipe.ZCard(ctx, key)
+	case "stream":
+		lenCmd = pipe.XLen(ctx, key)
+	}
+	if _, err := pipe.Exec(ctx); err != nil && err != redis.Nil {
+		return nil, err
+	}
+
+	ttl, err := ttlCmd.Result()
+	if err != nil {
+		return nil, err
+	}
+	total := int64(-1)
+	if lenCmd != nil {
+		if v, err := lenCmd.Result(); err == nil {
+			total = v
+		}
+	}
+	return &KeySummary{Meta: KeyMeta{Key: key, Type: t, TTL: ttl}, Total: total}, nil
+}
+
+func (c *Client) loadHashWindow(ctx context.Context, key string, offset, limit int, full bool) map[string]string {
+	if full {
+		v, err := c.rdb.HGetAll(ctx, key).Result()
+		if err != nil {
+			return nil
+		}
+		return v
+	}
+	out := make(map[string]string, limit)
+	var cursor uint64
+	seen := 0
+	for {
+		batch, next, err := c.rdb.HScan(ctx, key, cursor, "", int64(limit)).Result()
+		if err != nil {
+			return out
+		}
+		for i := 0; i+1 < len(batch); i += 2 {
+			if seen >= offset {
+				out[batch[i]] = batch[i+1]
+				if len(out) >= limit {
+					return out
+				}
+			}
+			seen++
+		}
+		if next == 0 {
+			return out
+		}
+		cursor = next
+	}
+}
+
+func (c *Client) loadSetWindow(ctx context.Context, key string, offset, limit int, full bool) []string {
+	if full {
+		v, err := c.rdb.SMembers(ctx, key).Result()
+		if err != nil {
+			return nil
+		}
+		return v
+	}
+	out := make([]string, 0, limit)
+	var cursor uint64
+	seen := 0
+	for {
+		batch, next, err := c.rdb.SScan(ctx, key, cursor, "", int64(limit)).Result()
+		if err != nil {
+			return out
+		}
+		for _, m := range batch {
+			if seen >= offset {
+				out = append(out, m)
+				if len(out) >= limit {
+					return out
+				}
+			}
+			seen++
+		}
+		if next == 0 {
+			return out
+		}
+		cursor = next
+	}
+}
+
+func (c *Client) loadStreamWindow(ctx context.Context, key string, offset, limit int, full bool) []StreamEntry {
+	var msgs []redis.XMessage
+	if full {
+		var err error
+		msgs, err = c.rdb.XRange(ctx, key, "-", "+").Result()
+		if err != nil {
+			return nil
+		}
+	} else {
+		var err error
+		msgs, err = c.rdb.XRangeN(ctx, key, "-", "+", int64(limit)).Result()
+		if err != nil {
+			return nil
+		}
+		if offset > 0 {
+			if offset >= len(msgs) {
+				return []StreamEntry{}
+			}
+			msgs = msgs[offset:]
+		}
+	}
+	out := make([]StreamEntry, 0, len(msgs))
+	for _, msg := range msgs {
+		fields := make(map[string]string, len(msg.Values))
+		for k, v := range msg.Values {
+			fields[k] = fmt.Sprint(v)
+		}
+		out = append(out, StreamEntry{ID: msg.ID, Fields: fields})
+	}
+	return out
 }
 
 func (c *Client) SetString(ctx context.Context, key, value string, ttl time.Duration) error {
@@ -683,14 +847,51 @@ func (c *Client) FlushDB(ctx context.Context) error {
 func FormatTTL(ttl time.Duration) string {
 	switch {
 	case ttl == -2*time.Second:
-		return "does not exist"
+		return "no existe"
 	case ttl == -1*time.Second:
-		return "no expiry"
+		return "infinito"
 	case ttl == 0:
-		return "0s"
+		return "0"
 	default:
-		return ttl.Round(time.Second).String()
+		return formatDecomposedTTL(ttl)
 	}
+}
+
+func formatDecomposedTTL(ttl time.Duration) string {
+	total := int64(ttl.Round(time.Second) / time.Second)
+	if total <= 0 {
+		return "0"
+	}
+	units := []struct {
+		size       int64
+		singular   string
+		plural     string
+		invariable string
+	}{
+		{365 * 24 * 3600, "anio", "anios", ""},
+		{30 * 24 * 3600, "mes", "meses", ""},
+		{24 * 3600, "dia", "dias", ""},
+		{3600, "", "", "h"},
+		{60, "", "", "min"},
+		{1, "", "", "seg"},
+	}
+	parts := make([]string, 0, len(units))
+	for _, u := range units {
+		if total < u.size {
+			continue
+		}
+		n := total / u.size
+		total %= u.size
+		switch {
+		case u.invariable != "":
+			parts = append(parts, strconv.FormatInt(n, 10)+u.invariable)
+		case n == 1:
+			parts = append(parts, "1 "+u.singular)
+		default:
+			parts = append(parts, strconv.FormatInt(n, 10)+" "+u.plural)
+		}
+	}
+	return strings.Join(parts, " ")
 }
 
 func ParseTTLInput(s string) (time.Duration, error) {

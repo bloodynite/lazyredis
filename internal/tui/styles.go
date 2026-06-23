@@ -16,8 +16,10 @@ var (
 	keySepStyle       lipgloss.Style
 	statusBarStyle    lipgloss.Style
 	headerBarStyle    lipgloss.Style
-	selectedStyle     lipgloss.Style
-	normalStyle       lipgloss.Style
+	selectedStyle         lipgloss.Style
+	searchMatchStyle      lipgloss.Style
+	activeSearchMatchStyle lipgloss.Style
+	normalStyle           lipgloss.Style
 	typeStringStyle   lipgloss.Style
 	typeHashStyle     lipgloss.Style
 	typeListStyle     lipgloss.Style
@@ -27,9 +29,10 @@ var (
 	panelFocusedStyle lipgloss.Style
 	panelTitleStyle   lipgloss.Style
 	infoBarStyle      lipgloss.Style
-	confirmModalStyle lipgloss.Style
-	confirmMsgStyle   lipgloss.Style
-	confirmHintStyle  lipgloss.Style
+	confirmModalStyle   lipgloss.Style
+	confirmMsgStyle     lipgloss.Style
+	confirmHintStyle    lipgloss.Style
+	helpGroupTitleStyle lipgloss.Style
 )
 
 func initStyles() {
@@ -50,6 +53,14 @@ func initStyles() {
 	headerBarStyle = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("4")).Padding(0, 1)
 
 	selectedStyle = lipgloss.NewStyle().Bold(true).Reverse(true)
+	searchMatchStyle = lipgloss.NewStyle().
+			Background(lipgloss.Color("3")).
+			Foreground(lipgloss.Color("0")).
+			Bold(true)
+	activeSearchMatchStyle = lipgloss.NewStyle().
+				Background(lipgloss.Color("1")).
+				Foreground(lipgloss.Color("7")).
+				Bold(true)
 	normalStyle = lipgloss.NewStyle()
 
 	typeStringStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("2"))
@@ -76,6 +87,7 @@ func initStyles() {
 		Padding(1, 2)
 	confirmMsgStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("3"))
 	confirmHintStyle = lipgloss.NewStyle().Foreground(faint)
+	helpGroupTitleStyle = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("4"))
 }
 
 func configureNewKeyTextarea(t *textarea.Model) {

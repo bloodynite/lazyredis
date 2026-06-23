@@ -1,6 +1,8 @@
 package tui
 
 import (
+	"time"
+
 	"github.com/charmbracelet/bubbles/spinner"
 	"github.com/charmbracelet/bubbles/textarea"
 	"github.com/charmbracelet/bubbles/textinput"
@@ -47,6 +49,14 @@ const (
 	editRefreshInterval
 )
 
+type sortOrder int
+
+const (
+	sortAZ sortOrder = iota
+	sortZA
+	sortOriginal
+)
+
 const (
 	newKeyFieldTTL = iota
 	newKeyFieldType
@@ -76,16 +86,32 @@ type Model struct {
 
 	Info        *store.ServerInfo
 	Keys        []string
+	SortOrder   sortOrder
 	ScanCursor  uint64
 	ScanPattern string
 	scanGen     uint64
 	KeyCursor   int
 	KeyScroll   int
 
+	TreeRoot        []*treeNode
+	ExpandedFolders map[string]bool
+	VisibleNodes    []*treeNode
+	SelectedNodePath string
+
 	SelectedKey string
 	KeyDetail   *store.KeyDetail
 	DetailCursor int
 	DetailScroll int
+	detailGen    uint64
+	DetailTotal         int64
+	DetailLoaded        int
+	detailChunkPending  bool
+	// detailRetryCount retries after transient errors WRONGTYPE/LOADING.
+	detailRetryCount    uint8
+
+	refreshGen uint64
+
+	RefreshStartedAt time.Time
 
 	EditMode     editMode
 	EditInput    textinput.Model
@@ -101,6 +127,7 @@ type Model struct {
 
 	ConfirmAction confirmAction
 	ConfirmTarget string
+	ConfirmInput  textinput.Model
 
 	Spinner spinner.Model
 	Loading bool
@@ -110,6 +137,11 @@ type Model struct {
 
 	SearchInput textinput.Model
 	SearchFocus bool
+
+	DetailSearchInput textinput.Model
+	DetailSearchFocus bool
+	DetailSearchMatches []int
+	DetailSearchCursor  int
 
 	PanelFocus panelFocus
 
@@ -124,6 +156,11 @@ func New() *Model {
 	search.Placeholder = "text or pattern (e.g. demo, user:*)"
 	search.CharLimit = 200
 	search.Width = 40
+
+	detailSearch := textinput.New()
+	detailSearch.Placeholder = "search value"
+	detailSearch.CharLimit = 200
+	detailSearch.Width = 40
 
 	edit := textinput.New()
 	edit.CharLimit = 10000
@@ -140,16 +177,26 @@ func New() *Model {
 	newKeyValue.SetWidth(40)
 	newKeyValue.SetHeight(6)
 
+	confirmInput := textinput.New()
+	confirmInput.Placeholder = "type profile name to confirm"
+	confirmInput.CharLimit = 256
+	confirmInput.Width = 40
+
 	return &Model{
-		Screen:      ScreenProfiles,
-		Spinner:     s,
-		SearchInput: search,
-		EditInput:   edit,
-		FormInputs:  inputs,
-		NewKeyTTL:   newKeyTTL,
-		NewKeyName:  newKeyName,
-		NewKeyValue: newKeyValue,
-		ScanPattern: "*",
+		Screen:            ScreenProfiles,
+		Spinner:           s,
+		SearchInput:       search,
+		DetailSearchInput: detailSearch,
+		EditInput:         edit,
+		FormInputs:        inputs,
+		NewKeyTTL:         newKeyTTL,
+		NewKeyName:        newKeyName,
+		NewKeyValue:       newKeyValue,
+		ConfirmInput:      confirmInput,
+		ScanPattern:       "*",
+		refreshGen:        1,
+		RefreshStartedAt:  time.Now(),
+		ExpandedFolders:   make(map[string]bool),
 	}
 }
 

@@ -35,8 +35,25 @@ type keysLoadedMsg struct {
 }
 
 type keyDetailMsg struct {
-	detail *store.KeyDetail
-	err    error
+	detail      *store.KeyDetail
+	err         error
+	key         string
+	gen         uint64
+	chunk       bool
+	appendOff   int
+	appendLimit int
+}
+
+type detailDebounceMsg struct {
+	key string
+	gen uint64
+}
+
+type keySummaryMsg struct {
+	summary *store.KeySummary
+	err     error
+	key     string
+	gen     uint64
 }
 
 type actionDoneMsg struct {
@@ -45,7 +62,9 @@ type actionDoneMsg struct {
 	reload bool
 }
 
-type autoRefreshMsg struct{}
+type autoRefreshMsg struct {
+	gen uint64
+}
 
 type statusClearMsg struct {
 	gen uint64
@@ -102,21 +121,46 @@ func scanKeys(client *store.Client, cursor uint64, pattern string, appendKeys bo
 				}
 				continue
 			}
-			if len(batch) > 0 {
-				break
-			}
 		}
 		return keysLoadedMsg{keys: keys, cursor: cur, append: appendKeys, pattern: pattern, gen: gen}
 	}
 }
 
-func loadKeyDetail(client *store.Client, key string) tea.Cmd {
+var (
+	loadKeyDetailFn  = loadKeyDetail
+	loadKeySummaryFn = loadKeySummary
+)
+
+func loadKeyDetail(client *store.Client, key string, offset, limit int, gen uint64, chunk bool) tea.Cmd {
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
-		detail, err := client.GetKey(ctx, key)
-		return keyDetailMsg{detail: detail, err: err}
+		detail, err := client.GetKey(ctx, key, offset, limit)
+		return keyDetailMsg{
+			detail:     detail,
+			err:        err,
+			key:        key,
+			gen:        gen,
+			chunk:      chunk,
+			appendOff:  offset,
+			appendLimit: limit,
+		}
 	}
+}
+
+func loadKeySummary(client *store.Client, key string, gen uint64) tea.Cmd {
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		summary, err := client.GetKeySummary(ctx, key)
+		return keySummaryMsg{summary: summary, err: err, key: key, gen: gen}
+	}
+}
+
+func scheduleDetailDebounce(key string, gen uint64) tea.Cmd {
+	return tea.Tick(detailDebounceDuration, func(time.Time) tea.Msg {
+		return detailDebounceMsg{key: key, gen: gen}
+	})
 }
 
 func saveKeyBody(client *store.Client, key, keyType string, body store.KeyBody, ttl time.Duration, renameFrom string) tea.Cmd {
@@ -206,12 +250,12 @@ func saveProfile(cfg *config.File, p config.Profile) tea.Cmd {
 	}
 }
 
-func scheduleAutoRefresh(d time.Duration) tea.Cmd {
+func scheduleAutoRefresh(d time.Duration, gen uint64) tea.Cmd {
 	if d <= 0 {
 		return nil
 	}
 	return tea.Tick(d, func(time.Time) tea.Msg {
-		return autoRefreshMsg{}
+		return autoRefreshMsg{gen: gen}
 	})
 }
 
@@ -451,3 +495,17 @@ func removeStreamEntry(client *store.Client, key, id string) tea.Cmd {
 		return actionDoneMsg{status: "entry deleted", reload: true}
 	}
 }
+
+var (
+	patchStringValueFn    = patchStringValue
+	patchHashFieldFn      = patchHashField
+	addHashFieldFn        = addHashField
+	patchListItemFn       = patchListItem
+	appendListItemFn      = appendListItem
+	addSetMemberFn        = addSetMember
+	replaceSetMemberFn    = replaceSetMember
+	addZSetMemberFn       = addZSetMember
+	replaceZSetMemberFn   = replaceZSetMember
+	addStreamEntryFn      = addStreamEntry
+	replaceStreamEntryFn  = replaceStreamEntry
+)
