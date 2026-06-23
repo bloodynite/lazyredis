@@ -118,7 +118,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case autoRefreshMsg:
 		if msg.gen != 0 && msg.gen != m.refreshGen {
-			return m, m.scheduleAutoRefreshCmd()
+			return m, m.scheduleAutoRefreshAt(msg.gen)
 		}
 		m.RefreshStartedAt = time.Now()
 		cmds := []tea.Cmd{m.scheduleAutoRefreshCmd()}
@@ -297,7 +297,17 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.Screen = ScreenBrowser
 			m.blurEditInputs()
 			if m.EditMode == editRefreshInterval {
-				return m, tea.Batch(m.scheduleAutoRefreshCmd(), statusCmd)
+				m.RefreshStartedAt = time.Now()
+				cmds := []tea.Cmd{}
+				if m.Client != nil {
+					m.Loading = true
+					cmds = append(cmds, m.refreshDataCmd()...)
+				}
+				if sched := m.scheduleAutoRefreshCmd(); sched != nil {
+					cmds = append(cmds, sched)
+				}
+				cmds = append(cmds, statusCmd)
+				return m, tea.Batch(cmds...)
 			}
 			if (m.EditMode == editNewKey || m.EditMode == editExistingKey) && msg.reload && m.Client != nil {
 				return m, tea.Batch(loadInfo(m.Client), m.rescanKeysCmd(), statusCmd)
@@ -1821,6 +1831,20 @@ func (m *Model) scheduleAutoRefreshCmd() tea.Cmd {
 	}
 	m.refreshGen++
 	return scheduleAutoRefresh(time.Duration(sec)*time.Second, m.refreshGen)
+}
+
+func (m *Model) scheduleAutoRefreshAt(gen uint64) tea.Cmd {
+	if m.Client == nil {
+		return nil
+	}
+	sec := config.DefaultRefreshIntervalSec
+	if m.Config != nil {
+		sec = m.Config.GetRefreshIntervalSec()
+	}
+	if sec <= 0 {
+		return nil
+	}
+	return scheduleAutoRefresh(time.Duration(sec)*time.Second, gen)
 }
 
 func (m *Model) rescanKeysCmd() tea.Cmd {

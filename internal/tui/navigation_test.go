@@ -112,6 +112,16 @@ func TestStaleAutoRefreshDropped(t *testing.T) {
 	if m.Loading {
 		t.Fatal("stale auto refresh should not trigger refresh")
 	}
+	if m.refreshGen != 7 {
+		t.Fatalf("stale auto refresh must not advance refreshGen, got %d, want 7", m.refreshGen)
+	}
+	if msg := cmd(); msg == nil {
+		t.Fatal("stale reschedule must yield a tick")
+	} else if arm, ok := msg.(autoRefreshMsg); !ok {
+		t.Fatalf("stale reschedule: expected autoRefreshMsg, got %T", msg)
+	} else if arm.gen != 5 {
+		t.Fatalf("stale reschedule: autoRefreshMsg.gen = %d, want 5 (must carry stale gen)", arm.gen)
+	}
 
 	// Current generation tick reschedules normally.
 	m.refreshGen = 8
@@ -122,6 +132,9 @@ func TestStaleAutoRefreshDropped(t *testing.T) {
 	}
 	if !m.Loading {
 		t.Fatal("current auto refresh must trigger refresh")
+	}
+	if m.refreshGen != 9 {
+		t.Fatalf("current auto refresh must advance refreshGen, got %d, want 9", m.refreshGen)
 	}
 }
 
