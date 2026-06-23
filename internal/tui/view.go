@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"math"
 	"runtime/debug"
+	"strconv"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -13,6 +14,82 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/mattn/go-runewidth"
 )
+
+func formatUptime(seconds string) string {
+	sec, err := strconv.ParseInt(seconds, 10, 64)
+	if err != nil || sec < 0 {
+		return seconds + "s"
+	}
+	const (
+		minute = 60
+		hour   = minute * 60
+		day    = hour * 24
+		week   = day * 7
+		month  = day * 30
+		year   = day * 365
+	)
+
+	var major, minor string
+	var majorVal, minorSec int64
+
+	switch {
+	case sec >= year:
+		majorVal = sec / year
+		minorSec = sec % year
+		major = fmt.Sprintf("%dy", majorVal)
+		if minorSec >= month {
+			minor = fmt.Sprintf("%dmo", minorSec/month)
+		} else if minorSec >= week {
+			minor = fmt.Sprintf("%dw", minorSec/week)
+		} else if minorSec >= day {
+			minor = fmt.Sprintf("%dd", minorSec/day)
+		}
+	case sec >= month:
+		majorVal = sec / month
+		minorSec = sec % month
+		major = fmt.Sprintf("%dmo", majorVal)
+		if minorSec >= week {
+			minor = fmt.Sprintf("%dw", minorSec/week)
+		} else if minorSec >= day {
+			minor = fmt.Sprintf("%dd", minorSec/day)
+		}
+	case sec >= week:
+		majorVal = sec / week
+		minorSec = sec % week
+		major = fmt.Sprintf("%dw", majorVal)
+		if minorSec >= day {
+			minor = fmt.Sprintf("%dd", minorSec/day)
+		}
+	case sec >= day:
+		majorVal = sec / day
+		minorSec = sec % day
+		major = fmt.Sprintf("%dd", majorVal)
+		if minorSec >= hour {
+			minor = fmt.Sprintf("%dh", minorSec/hour)
+		}
+	case sec >= hour:
+		majorVal = sec / hour
+		minorSec = sec % hour
+		major = fmt.Sprintf("%dh", majorVal)
+		if minorSec >= minute {
+			minor = fmt.Sprintf("%dm", minorSec/minute)
+		}
+	case sec >= minute:
+		majorVal = sec / minute
+		minorSec = sec % minute
+		major = fmt.Sprintf("%dm", majorVal)
+		if minorSec > 0 {
+			minor = fmt.Sprintf("%ds", minorSec)
+		}
+	default:
+		return fmt.Sprintf("%ds", sec)
+	}
+
+	if minor == "" {
+		return major
+	}
+	return major + minor
+}
 
 func (m *Model) View() string {
 	if m.Width == 0 {
@@ -169,7 +246,7 @@ func (m *Model) renderInfoLine2() string {
 				"clients " + m.Info.Connected,
 				"ops/s " + m.Info.OpsPerSec,
 				m.Info.Role,
-				"uptime " + m.Info.Uptime + "s",
+				"uptime " + formatUptime(m.Info.Uptime),
 				"auto " + m.autoRefreshLabel(),
 			}, "  ·  ")
 		}
@@ -721,7 +798,7 @@ func (m *Model) renderRefreshIntervalModal() string {
 	lines = append(lines, "")
 	lines = append(lines, m.renderRefreshIntervalChoices()...)
 	lines = append(lines, "")
-	lines = append(lines, confirmHintStyle.Render(m.editEnterSaveCancelHint()))
+	lines = append(lines, confirmHintStyle.Render(m.editEnterSaveHint()))
 	inner := strings.Join(lines, "\n")
 	width := min(40, max(20, m.Width-4))
 	return confirmModalStyle.Width(width).Render(inner)

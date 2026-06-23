@@ -254,6 +254,10 @@ func (m *Model) editCtrlEnterSaveCancelHint() string {
 	return m.saveCancelHint(actionSave)
 }
 
+func (m *Model) editEnterSaveHint() string {
+	return "enter save" + "   " + m.bindHint(actionEditEsc, "cancel")
+}
+
 func (m *Model) keyFormModalHint() string {
 	if m.EditMode == editNewKey && m.NewKeyFocus == newKeyFieldType {
 		return strings.Join([]string{
