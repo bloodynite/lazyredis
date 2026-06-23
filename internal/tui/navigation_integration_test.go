@@ -13,8 +13,8 @@ import (
 	"github.com/bloodynite/lazyredis/internal/store"
 )
 
-// TestNavigationGlyphversoFirst10Keys walks the model through every adjacent
-// pair of the first 10 alphabetically sorted glyphverso keys, measuring
+// TestNavigationSampleFirst10Keys walks the model through every adjacent
+// pair of the first 10 alphabetically sorted sample keys, measuring
 // wall-clock time from moveKeyCursor to KeyDetail populated. The test fails
 // if any single move exceeds navigationSloMs; it logs every measurement so a
 // regression stands out.
@@ -25,18 +25,18 @@ import (
 // selected key is in place.
 //
 // Run with:
-//   go test -tags=integration -run TestNavigationGlyphversoFirst10Keys -v ./internal/tui
-func TestNavigationGlyphversoFirst10Keys(t *testing.T) {
+//   go test -tags=integration -run TestNavigationSampleFirst10Keys -v ./internal/tui
+func TestNavigationSampleFirst10Keys(t *testing.T) {
 	if testing.Short() {
 		t.Skip("integration test")
 	}
 
-	p := loadGlyphversoProfileForTUI(t)
+	p := loadSampleProfileForTUI(t)
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
 	client, err := store.Connect(ctx, p)
 	if err != nil {
-		t.Skipf("glyphverso unreachable at %s: %v", p.Addr, err)
+		t.Skipf("sample unreachable at %s: %v", p.Addr, err)
 	}
 	t.Cleanup(func() { _ = client.Close() })
 
@@ -45,7 +45,7 @@ func TestNavigationGlyphversoFirst10Keys(t *testing.T) {
 		t.Fatalf("scan: %v", err)
 	}
 	if len(keys) == 0 {
-		t.Skip("glyphverso has no keys")
+		t.Skip("sample has no keys")
 	}
 	sort.Strings(keys)
 	if len(keys) > 10 {
@@ -53,7 +53,7 @@ func TestNavigationGlyphversoFirst10Keys(t *testing.T) {
 	}
 
 	// Pin loadKeySummaryFn / loadKeyDetailFn to real fakes that talk to
-	// glyphverso but record their elapsed time. We restore them on cleanup
+	// sample but record their elapsed time. We restore them on cleanup
 	// so other tests in the same binary are unaffected.
 	origSum, origDet := loadKeySummaryFn, loadKeyDetailFn
 	t.Cleanup(func() {

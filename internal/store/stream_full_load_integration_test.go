@@ -21,13 +21,13 @@ import (
 // Run with:
 //   go test -tags=integration -run TestStreamFullLoadRegression ./internal/store
 func TestStreamFullLoadRegression(t *testing.T) {
-	p := loadGlyphversoProfile(t)
+	p := loadSampleProfile(t)
 	p.DB = 15
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	c, err := Connect(ctx, p)
 	if err != nil {
-		t.Skipf("glyphverso unreachable: %v", err)
+		t.Skipf("sample unreachable: %v", err)
 	}
 	t.Cleanup(func() { _ = c.Close() })
 	if err := c.FlushDB(ctx); err != nil {

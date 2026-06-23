@@ -19,7 +19,7 @@ func TestTruncateShortStringFast(t *testing.T) {
 }
 
 // TestTruncateLongStringBoundedTime: a 30 KB string (mirroring the
-// auditTrail field on a glyphverso hash) must be truncated in well under
+// auditTrail field on a sample hash) must be truncated in well under
 // 10 ms. The naive O(n^2) implementation took ~9 s here and froze the UI
 // during render — see commit message for context.
 func TestTruncateLongStringBoundedTime(t *testing.T) {

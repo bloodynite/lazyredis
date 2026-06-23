@@ -13,9 +13,9 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-func loadGlyphversoProfile(t *testing.T) config.Profile {
+func loadSampleProfile(t *testing.T) config.Profile {
 	t.Helper()
-	path := os.Getenv("LAZYREDIS_GLYPHVERSO_PROFILES")
+	path := os.Getenv("LAZYREDIS_SAMPLE_PROFILES")
 	if path == "" {
 		home, err := os.UserHomeDir()
 		if err != nil {
@@ -25,7 +25,7 @@ func loadGlyphversoProfile(t *testing.T) config.Profile {
 	}
 	data, err := os.ReadFile(path)
 	if err != nil {
-		t.Skipf("glyphverso profile not readable at %s: %v", path, err)
+		t.Skipf("sample profile not readable at %s: %v", path, err)
 	}
 	var file struct {
 		Profiles []config.Profile `yaml:"profiles"`
@@ -34,22 +34,22 @@ func loadGlyphversoProfile(t *testing.T) config.Profile {
 		t.Fatal(err)
 	}
 	for i := range file.Profiles {
-		if file.Profiles[i].Name == "glyphverso" {
+		if file.Profiles[i].Name == "sample" {
 			return file.Profiles[i]
 		}
 	}
-	t.Skip("glyphverso profile not found in " + path)
+	t.Skip("sample profile not found in " + path)
 	return config.Profile{}
 }
 
 func TestGetKeySummaryAllTypes(t *testing.T) {
-	p := loadGlyphversoProfile(t)
+	p := loadSampleProfile(t)
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
 	client, err := Connect(ctx, p)
 	if err != nil {
-		t.Skipf("glyphverso unreachable at %s: %v", p.Addr, err)
+		t.Skipf("sample unreachable at %s: %v", p.Addr, err)
 	}
 	t.Cleanup(func() { _ = client.Close() })
 

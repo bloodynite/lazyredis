@@ -9,22 +9,22 @@ import (
 	"time"
 )
 
-// TestGlyphversoFirst10KeysProbe reports type, total, and per-call latency for
-// the first 10 alphabetically sorted keys in the glyphverso profile. The test
+// TestSampleFirst10KeysProbe reports type, total, and per-call latency for
+// the first 10 alphabetically sorted keys in the sample profile. The test
 // does not assert hard thresholds — it surfaces real numbers so a developer
 // can spot outliers (large strings, large hashes, large streams) before
 // chasing perceived UI latency.
 //
 // Run with:
-//   go test -tags=integration -run TestGlyphversoFirst10KeysProbe ./internal/store
-func TestGlyphversoFirst10KeysProbe(t *testing.T) {
-	p := loadGlyphversoProfile(t)
+//   go test -tags=integration -run TestSampleFirst10KeysProbe ./internal/store
+func TestSampleFirst10KeysProbe(t *testing.T) {
+	p := loadSampleProfile(t)
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 
 	client, err := Connect(ctx, p)
 	if err != nil {
-		t.Skipf("glyphverso unreachable at %s: %v", p.Addr, err)
+		t.Skipf("sample unreachable at %s: %v", p.Addr, err)
 	}
 	t.Cleanup(func() { _ = client.Close() })
 
@@ -33,7 +33,7 @@ func TestGlyphversoFirst10KeysProbe(t *testing.T) {
 		t.Fatalf("scan: %v", err)
 	}
 	if len(keys) == 0 {
-		t.Skip("glyphverso has no keys; seed the profile before running this test")
+		t.Skip("sample has no keys; seed the profile before running this test")
 	}
 	sort.Strings(keys)
 	if len(keys) > 10 {
@@ -87,22 +87,22 @@ func TestGlyphversoFirst10KeysProbe(t *testing.T) {
 	}
 }
 
-// TestGlyphversoNavigationLatencyPerType isolates per-type summary + detail
-// latency for the first key of each type found in glyphverso. This is the
+// TestSampleNavigationLatencyPerType isolates per-type summary + detail
+// latency for the first key of each type found in sample. This is the
 // latency the user pays on every cursor move that lands on a new type. If
 // any type costs more than ~50ms, the perceived "lag" is at the network or
 // store layer, not the debounce.
 //
 // Run with:
-//   go test -tags=integration -run TestGlyphversoNavigationLatencyPerType ./internal/store
-func TestGlyphversoNavigationLatencyPerType(t *testing.T) {
-	p := loadGlyphversoProfile(t)
+//   go test -tags=integration -run TestSampleNavigationLatencyPerType ./internal/store
+func TestSampleNavigationLatencyPerType(t *testing.T) {
+	p := loadSampleProfile(t)
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 
 	client, err := Connect(ctx, p)
 	if err != nil {
-		t.Skipf("glyphverso unreachable at %s: %v", p.Addr, err)
+		t.Skipf("sample unreachable at %s: %v", p.Addr, err)
 	}
 	t.Cleanup(func() { _ = client.Close() })
 
@@ -122,7 +122,7 @@ func TestGlyphversoNavigationLatencyPerType(t *testing.T) {
 		}
 	}
 	if len(firstOfType) == 0 {
-		t.Skip("no keys with readable type in glyphverso")
+		t.Skip("no keys with readable type in sample")
 	}
 
 	// Probe 10 navigations per type: simulates the user pressing j nine times
