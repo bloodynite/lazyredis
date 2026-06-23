@@ -992,29 +992,49 @@ func (m *Model) applyHelpOverlay(base string) string {
 
 func (m *Model) renderHelpModal() string {
 	groups := m.helpGroups()
+	width := min(90, max(56, m.Width*3/4))
+	innerWidth := width - 6
+	colWidth := innerWidth/2 - 2
+
 	var lines []string
 	lines = append(lines, panelTitleStyle.Render("Keyboard shortcuts"))
 	lines = append(lines, "")
+
 	for _, g := range groups {
 		if g.Title != "" {
 			lines = append(lines, helpGroupTitleStyle.Render(g.Title))
 		}
-		for _, def := range g.Defs {
-			lines = append(lines, fmt.Sprintf("  %-16s %s", formatBindKeys(m.bindKeys(def.id)), def.desc))
+		defs := g.Defs
+		for i := 0; i < len(defs); i += 2 {
+			ld := defs[i]
+			left := fmt.Sprintf("%-12s %s", formatBindKeys(m.bindKeys(ld.id)), ld.desc)
+			var right string
+			if i+1 < len(defs) {
+				rd := defs[i+1]
+				right = fmt.Sprintf("%-12s %s", formatBindKeys(m.bindKeys(rd.id)), rd.desc)
+			}
+			paddedLeft := left + strings.Repeat(" ", max(0, colWidth-lipgloss.Width(left)))
+			if right != "" {
+				lines = append(lines, "  "+paddedLeft+"  "+right)
+			} else {
+				lines = append(lines, "  "+left)
+			}
 		}
 		lines = append(lines, "")
 	}
+
 	if len(lines) > 0 && lines[len(lines)-1] == "" {
 		lines = lines[:len(lines)-1]
 	}
+
 	lines = append(lines, "",
 		confirmHintStyle.Render("Customize shortcut modifier with settings.shortcut_modifier"),
 		confirmHintStyle.Render("Use ctrl or alt"),
 		"",
 		confirmHintStyle.Render("Press ? or esc to close"),
 	)
+
 	inner := strings.Join(lines, "\n")
-	width := min(72, max(48, m.Width*2/3))
 	return confirmModalStyle.Width(width).Render(inner)
 }
 
