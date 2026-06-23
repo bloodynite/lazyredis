@@ -121,12 +121,6 @@ func scanKeys(client *store.Client, cursor uint64, pattern string, appendKeys bo
 				}
 				continue
 			}
-			// TODO: non-append path breaks after first batch, so initial
-			// connect/auto-refresh only loads 100 keys. Auto-refresh then
-			// replaces m.Keys with first 100 again, dropping pagination.
-			if len(batch) > 0 {
-				break
-			}
 		}
 		return keysLoadedMsg{keys: keys, cursor: cur, append: appendKeys, pattern: pattern, gen: gen}
 	}
