@@ -196,10 +196,10 @@ func (m *Model) autoRefreshLabel() string {
 	if sec <= 0 {
 		return "off"
 	}
-	return fmt.Sprintf("%ds %s", sec, refreshBar(time.Since(m.RefreshStartedAt), sec, m.TickFrame))
+	return fmt.Sprintf("%ds %s", sec, refreshBar(time.Since(m.RefreshStartedAt), sec))
 }
 
-func refreshBar(elapsed time.Duration, intervalSec int, frame int) string {
+func refreshBar(elapsed time.Duration, intervalSec int) string {
 	const width = 10
 	if intervalSec <= 0 {
 		return strings.Repeat("▢", width)
@@ -215,25 +215,13 @@ func refreshBar(elapsed time.Duration, intervalSec int, frame int) string {
 	if filled > width {
 		filled = width
 	}
-	boundary := []string{"▣", "▢"}[frame%2]
-	animatedPos := -1
-	if filled > 0 && filled < width {
-		animatedPos = filled
-	} else if filled == width {
-		animatedPos = width - 1
+	if filled <= 0 {
+		return strings.Repeat("▢", width)
 	}
-	var b strings.Builder
-	for i := 0; i < width; i++ {
-		switch {
-		case i == animatedPos:
-			b.WriteString(boundary)
-		case i < filled:
-			b.WriteString("▣")
-		default:
-			b.WriteString("▢")
-		}
+	if filled >= width {
+		return strings.Repeat("▣", width)
 	}
-	return b.String()
+	return strings.Repeat("▣", filled) + strings.Repeat("▢", width-filled)
 }
 
 func (m *Model) browserPanelWidths() (left, right int) {

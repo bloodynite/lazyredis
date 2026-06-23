@@ -112,7 +112,6 @@ type Model struct {
 	refreshGen uint64
 
 	RefreshStartedAt time.Time
-	TickFrame        int
 
 	EditMode     editMode
 	EditInput    textinput.Model

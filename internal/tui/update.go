@@ -114,23 +114,19 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.detailGen = 0
 		statusCmd := m.statusClearCmd(fmt.Sprintf("connected to %s", msg.client.Profile().Name))
 		m.RefreshStartedAt = time.Now()
-		return m, tea.Batch(loadInfo(m.Client), scanKeys(m.Client, 0, m.ScanPattern, false, m.scanGen), m.Spinner.Tick, m.scheduleAutoRefreshCmd(), scheduleTick(), statusCmd)
+		return m, tea.Batch(loadInfo(m.Client), scanKeys(m.Client, 0, m.ScanPattern, false, m.scanGen), m.Spinner.Tick, m.scheduleAutoRefreshCmd(), statusCmd)
 
 	case autoRefreshMsg:
 		if msg.gen != 0 && msg.gen != m.refreshGen {
 			return m, m.scheduleAutoRefreshCmd()
 		}
 		m.RefreshStartedAt = time.Now()
-		cmds := []tea.Cmd{m.scheduleAutoRefreshCmd(), scheduleTick()}
+		cmds := []tea.Cmd{m.scheduleAutoRefreshCmd()}
 		if m.canAutoRefresh() {
 			m.Loading = true
 			cmds = append(cmds, m.refreshDataCmd()...)
 		}
 		return m, tea.Batch(cmds...)
-
-	case tickMsg:
-		m.TickFrame++
-		return m, scheduleTick()
 
 	case infoLoadedMsg:
 		m.Loading = false
