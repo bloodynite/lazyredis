@@ -1,8 +1,10 @@
 package tui
 
 import (
+	"fmt"
 	"strings"
 	"testing"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/bubbles/textarea"
@@ -811,5 +813,509 @@ func TestViewDetailEditTextareaFillsBodyOverlay(t *testing.T) {
 		if w := lipgloss.Width(l); w != m.Width {
 			t.Fatalf("panel line %d width = %d, want %d (line=%q)", i, w, m.Width, l)
 		}
+	}
+}
+
+func TestIsKeyBodyTooLargeForKeyPanel(t *testing.T) {
+	cases := []struct {
+		name string
+		d    *store.KeyDetail
+		want bool
+	}{
+		{
+			name: "nil detail",
+			d:    nil,
+			want: false,
+		},
+		{
+			name: "short string",
+			d:    &store.KeyDetail{Meta: store.KeyMeta{Key: "k", Type: "string"}, String: "hello"},
+			want: false,
+		},
+		{
+			name: "string too long in one line",
+			d:    &store.KeyDetail{Meta: store.KeyMeta{Key: "k", Type: "string"}, String: strings.Repeat("x", 5000)},
+			want: true,
+		},
+		{
+			name: "string with many newlines",
+			d:    &store.KeyDetail{Meta: store.KeyMeta{Key: "k", Type: "string"}, String: strings.Repeat("a\n", 20)},
+			want: true,
+		},
+		{
+			name: "list with many items",
+			d:    &store.KeyDetail{Meta: store.KeyMeta{Key: "k", Type: "list"}, List: makeList(20)},
+			want: true,
+		},
+		{
+			name: "list with few items",
+			d:    &store.KeyDetail{Meta: store.KeyMeta{Key: "k", Type: "list"}, List: []string{"a", "b"}},
+			want: false,
+		},
+		{
+			name: "unknown type",
+			d:    &store.KeyDetail{Meta: store.KeyMeta{Key: "k", Type: "weird"}},
+			want: false,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			m := &Model{KeyDetail: tc.d}
+			if got := m.isKeyBodyTooLargeForKeyPanel(); got != tc.want {
+				t.Fatalf("isKeyBodyTooLargeForKeyPanel = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+func makeList(n int) []string {
+	out := make([]string, n)
+	for i := range out {
+		out[i] = fmt.Sprintf("item-%d", i)
+	}
+	return out
+}
+
+func TestNewKeyValueCharLimitAcceptsLargeValue(t *testing.T) {
+	m := New()
+	if m.NewKeyValue.CharLimit != keyPanelCharLimit {
+		t.Fatalf("CharLimit = %d, want %d", m.NewKeyValue.CharLimit, keyPanelCharLimit)
+	}
+	large := strings.Repeat("z", 50000)
+	m.NewKeyValue.SetValue(large)
+	if got := m.NewKeyValue.Value(); len(got) != len(large) {
+		t.Fatalf("textarea truncated large value: got %d chars, want %d", len(got), len(large))
+	}
+}
+
+func TestKeyPanelEditKeepsModalWhenBodySmall(t *testing.T) {
+	m := New()
+	m.Width = 120
+	m.Height = 24
+	m.PanelFocus = panelKeys
+	m.SelectedKey = "demo:small"
+	m.Client = &store.Client{}
+	m.KeyDetail = &store.KeyDetail{
+		Meta:   store.KeyMeta{Key: "demo:small", Type: "string"},
+		String: "short value",
+	}
+
+	next, _ := m.startEdit()
+	m = next.(*Model)
+
+	if m.PanelFocus != panelKeys {
+		t.Fatalf("PanelFocus = %v, want panelKeys (no layout switch)", m.PanelFocus)
+	}
+	if m.EditMode != editExistingKey {
+		t.Fatalf("EditMode = %v, want editExistingKey", m.EditMode)
+	}
+	if m.editExistingKeyNeedsFullScreen() {
+		t.Fatal("small body should not need full-screen layout")
+	}
+}
+
+func TestKeyPanelEditUsesFullScreenWhenBodyLarge(t *testing.T) {
+	m := New()
+	m.Width = 120
+	m.Height = 24
+	m.PanelFocus = panelKeys
+	m.SelectedKey = "demo:big"
+	m.Client = &store.Client{}
+	m.KeyDetail = &store.KeyDetail{
+		Meta:   store.KeyMeta{Key: "demo:big", Type: "string"},
+		String: strings.Repeat("x", 5000),
+	}
+
+	next, _ := m.startEdit()
+	m = next.(*Model)
+
+	if m.PanelFocus != panelKeys {
+		t.Fatalf("PanelFocus = %v, want panelKeys (no panel switch)", m.PanelFocus)
+	}
+	if m.EditMode != editExistingKey {
+		t.Fatalf("EditMode = %v, want editExistingKey (no redirect to element edit)", m.EditMode)
+	}
+	if !m.editExistingKeyNeedsFullScreen() {
+		t.Fatal("large body should need full-screen layout")
+	}
+	if got := m.NewKeyValue.Value(); got != m.KeyDetail.String {
+		t.Fatalf("textarea missing chars: got %d, want %d", len(got), len(m.KeyDetail.String))
+	}
+}
+
+func TestKeyPanelEditUsesFullScreenWhenBodyManyLines(t *testing.T) {
+	m := New()
+	m.Width = 120
+	m.Height = 24
+	m.PanelFocus = panelKeys
+	m.SelectedKey = "demo:list"
+	m.Client = &store.Client{}
+	m.KeyDetail = &store.KeyDetail{
+		Meta: store.KeyMeta{Key: "demo:list", Type: "list"},
+		List: makeList(30),
+	}
+
+	next, _ := m.startEdit()
+	m = next.(*Model)
+
+	if m.EditMode != editExistingKey {
+		t.Fatalf("EditMode = %v, want editExistingKey", m.EditMode)
+	}
+	if !m.editExistingKeyNeedsFullScreen() {
+		t.Fatal("many-line body should need full-screen layout")
+	}
+}
+
+func TestDetailPanelEditUsesElementEditor(t *testing.T) {
+	m := New()
+	m.Width = 120
+	m.Height = 24
+	m.PanelFocus = panelDetail
+	m.SelectedKey = "demo:small"
+	m.Client = &store.Client{}
+	m.KeyDetail = &store.KeyDetail{
+		Meta:   store.KeyMeta{Key: "demo:small", Type: "string"},
+		String: "short value",
+	}
+
+	next, _ := m.startDetailEdit()
+	m = next.(*Model)
+
+	if m.EditMode != editElement {
+		t.Fatalf("EditMode = %v, want editElement from detail panel", m.EditMode)
+	}
+}
+
+func TestEditExistingKeyNeedsFullScreen(t *testing.T) {
+	cases := []struct {
+		name string
+		m    *Model
+		want bool
+	}{
+		{
+			name: "non-existing-key mode",
+			m:    &Model{EditMode: editNewKey, KeyDetail: &store.KeyDetail{}},
+			want: false,
+		},
+		{
+			name: "existing-key with small body",
+			m: &Model{
+				EditMode:  editExistingKey,
+				KeyDetail: &store.KeyDetail{Meta: store.KeyMeta{Type: "string"}, String: "tiny"},
+			},
+			want: false,
+		},
+		{
+			name: "existing-key with large body",
+			m: &Model{
+				EditMode: editExistingKey,
+				KeyDetail: &store.KeyDetail{
+					Meta:   store.KeyMeta{Type: "string"},
+					String: strings.Repeat("a", 5000),
+				},
+			},
+			want: true,
+		},
+		{
+			name: "existing-key with many lines",
+			m: &Model{
+				EditMode: editExistingKey,
+				KeyDetail: &store.KeyDetail{
+					Meta:  store.KeyMeta{Type: "list"},
+					List:  makeList(20),
+				},
+			},
+			want: true,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := tc.m.editExistingKeyNeedsFullScreen(); got != tc.want {
+				t.Fatalf("editExistingKeyNeedsFullScreen = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestRenderKeyEditFullScreenHasAllFields(t *testing.T) {
+	m := New()
+	m.Width = 120
+	m.Height = 24
+	m.PanelFocus = panelKeys
+	m.SelectedKey = "demo:big"
+	m.Client = &store.Client{}
+	m.KeyDetail = &store.KeyDetail{
+		Meta:   store.KeyMeta{Key: "demo:big", Type: "string"},
+		String: strings.Repeat("x", 5000),
+	}
+	if _, cmd := m.startEdit(); cmd != nil {
+		_ = cmd
+	}
+	m.syncNewKeyLayout()
+
+	out := m.renderKeyEditFullScreen()
+	for _, marker := range []string{"Edit key", "TTL:", "Type:", "Key:", "Value:"} {
+		if !strings.Contains(out, marker) {
+			t.Fatalf("full-screen edit missing %q in:\n%s", marker, out)
+		}
+	}
+}
+
+func TestViewKeyEditDispatchesFullScreenForLargeBody(t *testing.T) {
+	m := New()
+	m.Width = 120
+	m.Height = 24
+	m.PanelFocus = panelKeys
+	m.Screen = ScreenKeyEdit
+	m.SelectedKey = "demo:big"
+	m.Client = &store.Client{}
+	m.KeyDetail = &store.KeyDetail{
+		Meta:   store.KeyMeta{Key: "demo:big", Type: "string"},
+		String: strings.Repeat("x", 5000),
+	}
+	if _, cmd := m.startEdit(); cmd != nil {
+		_ = cmd
+	}
+
+	out := m.View()
+	if !strings.Contains(out, "Edit key") {
+		t.Fatalf("view should render full-screen editor with 'Edit key' title, got:\n%s", out)
+	}
+	if !strings.Contains(out, "Type:") {
+		t.Fatalf("view should expose Type field for full-screen edit, got:\n%s", out)
+	}
+}
+
+func TestKeyFormModalPutsTypeBeforeTTL(t *testing.T) {
+	m := New()
+	m.Width = 120
+	m.Height = 24
+	m.Client = &store.Client{}
+	m.SelectedKey = "demo:key"
+	m.KeyDetail = &store.KeyDetail{
+		Meta:   store.KeyMeta{Key: "demo:key", Type: "string", TTL: 300 * time.Second},
+		String: "hi",
+	}
+	m.EditMode = editExistingKey
+	m.NewKeyFocus = newKeyFieldTTL
+	if _, cmd := m.startEdit(); cmd != nil {
+		_ = cmd
+	}
+	m.syncNewKeyLayout()
+
+	out := m.renderKeyFormModal()
+	typeIdx := strings.Index(out, "Type:")
+	ttlIdx := strings.Index(out, "TTL:")
+	if typeIdx < 0 || ttlIdx < 0 {
+		t.Fatalf("modal missing Type or TTL marker; out:\n%s", out)
+	}
+	if typeIdx > ttlIdx {
+		t.Fatalf("expected Type before TTL, got Type@%d TTL@%d\n%s", typeIdx, ttlIdx, out)
+	}
+}
+
+func TestKeyEditFullScreenPutsTypeBeforeTTL(t *testing.T) {
+	m := New()
+	m.Width = 120
+	m.Height = 24
+	m.Client = &store.Client{}
+	m.SelectedKey = "demo:big"
+	m.KeyDetail = &store.KeyDetail{
+		Meta:   store.KeyMeta{Key: "demo:big", Type: "string", TTL: 300 * time.Second},
+		String: strings.Repeat("x", 5000),
+	}
+	m.EditMode = editExistingKey
+	m.NewKeyFocus = newKeyFieldTTL
+	if _, cmd := m.startEdit(); cmd != nil {
+		_ = cmd
+	}
+	m.syncNewKeyLayout()
+
+	out := m.renderKeyEditFullScreen()
+	typeIdx := strings.Index(out, "Type:")
+	ttlIdx := strings.Index(out, "TTL:")
+	if typeIdx < 0 || ttlIdx < 0 {
+		t.Fatalf("full-screen missing Type or TTL marker; out:\n%s", out)
+	}
+	if typeIdx > ttlIdx {
+		t.Fatalf("expected Type before TTL, got Type@%d TTL@%d\n%s", typeIdx, ttlIdx, out)
+	}
+}
+
+func TestFocusNewKeyValueMovesCursorToStartForMultiLine(t *testing.T) {
+	m := New()
+	m.NewKeyValue.SetValue(strings.Repeat("a\n", 30))
+	if line := m.NewKeyValue.Line(); line == 0 {
+		t.Fatalf("SetValue should leave cursor on last line, got row %d", line)
+	}
+
+	cmd := m.focusNewKeyField(newKeyFieldValue)
+	if cmd == nil {
+		t.Fatal("expected focus command batch")
+	}
+	if line := m.NewKeyValue.Line(); line != 0 {
+		t.Fatalf("expected cursor on row 0 after focus, got %d", line)
+	}
+}
+
+func TestFocusNewKeyValueMovesCursorToStartForSingleLineLong(t *testing.T) {
+	m := New()
+	long := strings.Repeat("x", 5000)
+	m.NewKeyValue.SetValue(long)
+	if line := m.NewKeyValue.Line(); line != 0 {
+		t.Fatalf("single-line value should keep cursor on row 0, got %d", line)
+	}
+	beforeLen := m.NewKeyValue.Length()
+	if beforeLen != 5000 {
+		t.Fatalf("textarea length = %d, want 5000", beforeLen)
+	}
+
+	cmd := m.focusNewKeyField(newKeyFieldValue)
+	if cmd == nil {
+		t.Fatal("expected focus command batch")
+	}
+	if line := m.NewKeyValue.Line(); line != 0 {
+		t.Fatalf("expected cursor on row 0 after focus, got %d", line)
+	}
+	if m.NewKeyValue.Length() != 5000 {
+		t.Fatalf("focus must not change value length, got %d", m.NewKeyValue.Length())
+	}
+}
+
+func TestKeyFormModalFieldOrder(t *testing.T) {
+	m := New()
+	m.Width = 120
+	m.Height = 24
+	m.Client = &store.Client{}
+	m.SelectedKey = "demo:key"
+	m.KeyDetail = &store.KeyDetail{
+		Meta:   store.KeyMeta{Key: "demo:key", Type: "string", TTL: 300 * time.Second},
+		String: "hi",
+	}
+	m.EditMode = editExistingKey
+	m.NewKeyFocus = newKeyFieldTTL
+	if _, cmd := m.startEdit(); cmd != nil {
+		_ = cmd
+	}
+	m.syncNewKeyLayout()
+
+	out := m.renderKeyFormModal()
+	typeIdx := strings.Index(out, "Type:")
+	keyIdx := strings.Index(out, "Key:")
+	ttlIdx := strings.Index(out, "TTL:")
+	valueIdx := strings.Index(out, "Value:")
+	if typeIdx < 0 || keyIdx < 0 || ttlIdx < 0 || valueIdx < 0 {
+		t.Fatalf("modal missing one of Type/Key/TTL/Value markers; out:\n%s", out)
+	}
+	if !(typeIdx < keyIdx && keyIdx < ttlIdx && ttlIdx < valueIdx) {
+		t.Fatalf("expected order Type < Key < TTL < Value, got Type@%d Key@%d TTL@%d Value@%d\n%s",
+			typeIdx, keyIdx, ttlIdx, valueIdx, out)
+	}
+}
+
+func TestKeyEditFullScreenFieldOrder(t *testing.T) {
+	m := New()
+	m.Width = 120
+	m.Height = 24
+	m.Client = &store.Client{}
+	m.SelectedKey = "demo:big"
+	m.KeyDetail = &store.KeyDetail{
+		Meta:   store.KeyMeta{Key: "demo:big", Type: "string", TTL: 300 * time.Second},
+		String: strings.Repeat("x", 5000),
+	}
+	m.EditMode = editExistingKey
+	m.NewKeyFocus = newKeyFieldTTL
+	if _, cmd := m.startEdit(); cmd != nil {
+		_ = cmd
+	}
+	m.syncNewKeyLayout()
+
+	out := m.renderKeyEditFullScreen()
+	typeIdx := strings.Index(out, "Type:")
+	keyIdx := strings.Index(out, "Key:")
+	ttlIdx := strings.Index(out, "TTL:")
+	valueIdx := strings.Index(out, "Value:")
+	if typeIdx < 0 || keyIdx < 0 || ttlIdx < 0 || valueIdx < 0 {
+		t.Fatalf("full-screen missing one of Type/Key/TTL/Value markers; out:\n%s", out)
+	}
+	if !(typeIdx < keyIdx && keyIdx < ttlIdx && ttlIdx < valueIdx) {
+		t.Fatalf("expected order Type < Key < TTL < Value, got Type@%d Key@%d TTL@%d Value@%d\n%s",
+			typeIdx, keyIdx, ttlIdx, valueIdx, out)
+	}
+}
+
+func TestKeyFormFieldOrderPerMode(t *testing.T) {
+	cases := []struct {
+		mode editMode
+		want []int
+	}{
+		{editNewKey, []int{newKeyFieldType, newKeyFieldKey, newKeyFieldTTL, newKeyFieldValue}},
+		{editExistingKey, []int{newKeyFieldKey, newKeyFieldTTL, newKeyFieldValue}},
+	}
+	for _, tc := range cases {
+		m := &Model{EditMode: tc.mode}
+		order := m.keyFormFieldOrder()
+		if len(order) != len(tc.want) {
+			t.Fatalf("mode %v: order length = %d, want %d (order=%v)", tc.mode, len(order), len(tc.want), order)
+		}
+		for i := range tc.want {
+			if order[i] != tc.want[i] {
+				t.Fatalf("mode %v: order[%d] = %d, want %d (order=%v)", tc.mode, i, order[i], tc.want[i], order)
+			}
+		}
+	}
+}
+
+func TestStartEditInitialFocusIsKey(t *testing.T) {
+	m := New()
+	m.Width = 120
+	m.Height = 24
+	m.Client = &store.Client{}
+	m.SelectedKey = "demo:key"
+	m.KeyDetail = &store.KeyDetail{
+		Meta:   store.KeyMeta{Key: "demo:key", Type: "string"},
+		String: "hi",
+	}
+
+	next, _ := m.startEdit()
+	m = next.(*Model)
+
+	if m.NewKeyFocus != newKeyFieldKey {
+		t.Fatalf("initial focus = %d, want newKeyFieldKey (%d)", m.NewKeyFocus, newKeyFieldKey)
+	}
+	if !m.NewKeyName.Focused() {
+		t.Fatal("expected NewKeyName (key name input) to be focused")
+	}
+	if m.NewKeyTTL.Focused() {
+		t.Fatal("NewKeyTTL should not be focused on initial open")
+	}
+	if m.NewKeyValue.Focused() {
+		t.Fatal("NewKeyValue should not be focused on initial open")
+	}
+}
+
+func TestNewKeyFormInitialFocusIsType(t *testing.T) {
+	m := New()
+	m.Width = 120
+	m.Height = 24
+	m.Client = &store.Client{}
+
+	m.openKeyFormModal(true)
+	_ = m.focusNewKeyField(newKeyFieldType)
+
+	if m.NewKeyFocus != newKeyFieldType {
+		t.Fatalf("initial focus = %d, want newKeyFieldType (%d)", m.NewKeyFocus, newKeyFieldType)
+	}
+	if m.EditMode != editNewKey {
+		t.Fatalf("EditMode = %v, want editNewKey", m.EditMode)
+	}
+	if m.NewKeyTTL.Focused() {
+		t.Fatal("NewKeyTTL should not be focused on initial open")
+	}
+	if m.NewKeyName.Focused() {
+		t.Fatal("NewKeyName should not be focused on initial open")
+	}
+	if m.NewKeyValue.Focused() {
+		t.Fatal("NewKeyValue should not be focused on initial open")
 	}
 }

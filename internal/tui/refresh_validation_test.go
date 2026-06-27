@@ -9,36 +9,59 @@ import (
 	"github.com/bloodynite/lazyredis/internal/store"
 )
 
-func TestEditRefreshIntervalRejectsBelowMinimum(t *testing.T) {
-	cfg := &config.File{}
-	cases := []string{"1", "3", "4", "-1", "abc"}
+func TestEditRefreshIntervalAcceptsValidValues(t *testing.T) {
+	cases := []int{0, 5, 10, 15, 30, 60}
 	for _, v := range cases {
+		idx := refreshIntervalCursor(v)
 		m := New()
 		m.EditMode = editRefreshInterval
-		m.Config = cfg
-		m.EditInput.SetValue(v)
+		m.Config = &config.File{}
+		m.RefreshIntervalCursor = idx
 
-		next, _ := m.updateEditInput(tea.KeyMsg{Type: tea.KeyCtrlS})
-		nm := next.(*Model)
-		if nm.ErrMsg == "" {
-			t.Errorf("sec=%q: expected ErrMsg, got empty", v)
+		_, cmd := m.updateRefreshIntervalModal(tea.KeyMsg{Type: tea.KeyEnter})
+		if cmd == nil {
+			t.Errorf("sec=%d: expected save cmd", v)
 		}
 	}
 }
 
-func TestEditRefreshIntervalAcceptsValidValues(t *testing.T) {
-	cfg := &config.File{}
-	cases := []string{"0", "5", "10", "60"}
-	for _, v := range cases {
-		m := New()
-		m.EditMode = editRefreshInterval
-		m.Config = cfg
-		m.EditInput.SetValue(v)
+func TestEditRefreshIntervalCtrlSSaves(t *testing.T) {
+	m := New()
+	m.EditMode = editRefreshInterval
+	m.Config = &config.File{}
+	m.RefreshIntervalCursor = refreshIntervalCursor(10)
 
-		_, cmd := m.updateEditInput(tea.KeyMsg{Type: tea.KeyCtrlS})
-		if cmd == nil {
-			t.Errorf("sec=%q: expected save cmd", v)
-		}
+	_, cmd := m.updateRefreshIntervalModal(tea.KeyMsg{Type: tea.KeyCtrlS})
+	if cmd == nil {
+		t.Fatal("expected save cmd from ctrl+s")
+	}
+}
+
+func TestEditRefreshIntervalNavigatesChoices(t *testing.T) {
+	m := New()
+	m.EditMode = editRefreshInterval
+	m.RefreshIntervalCursor = 0
+
+	m.updateRefreshIntervalModal(tea.KeyMsg{Type: tea.KeyDown})
+	if m.RefreshIntervalCursor != 1 {
+		t.Fatalf("down should move cursor to 1, got %d", m.RefreshIntervalCursor)
+	}
+	m.updateRefreshIntervalModal(tea.KeyMsg{Type: tea.KeyDown})
+	if m.RefreshIntervalCursor != 2 {
+		t.Fatalf("down should move cursor to 2, got %d", m.RefreshIntervalCursor)
+	}
+	m.updateRefreshIntervalModal(tea.KeyMsg{Type: tea.KeyUp})
+	if m.RefreshIntervalCursor != 1 {
+		t.Fatalf("up should move cursor to 1, got %d", m.RefreshIntervalCursor)
+	}
+	m.updateRefreshIntervalModal(tea.KeyMsg{Type: tea.KeyUp})
+	m.updateRefreshIntervalModal(tea.KeyMsg{Type: tea.KeyUp})
+	if m.RefreshIntervalCursor != len(refreshIntervalChoices)-1 {
+		t.Fatalf("up from 0 should wrap to last, got %d", m.RefreshIntervalCursor)
+	}
+	m.updateRefreshIntervalModal(tea.KeyMsg{Type: tea.KeyDown})
+	if m.RefreshIntervalCursor != 0 {
+		t.Fatalf("down from last should wrap to 0, got %d", m.RefreshIntervalCursor)
 	}
 }
 

@@ -413,6 +413,9 @@ func (m *Model) handleInputKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if m.EditMode == editTTL {
 			return m.updateTTLModalInputs(msg)
 		}
+		if m.EditMode == editRefreshInterval {
+			return m.updateRefreshIntervalModal(msg)
+		}
 		if (m.EditMode == editElement || m.EditMode == editElementAdd) && m.elementEditUsesTextarea() {
 			return m.updateElementTextareaInput(msg)
 		}
@@ -801,7 +804,7 @@ func (m *Model) handleBrowserKeys(key string, msg tea.KeyMsg) (tea.Model, tea.Cm
 		m.SearchInput.Focus()
 	case m.matchAction(actionBrowserNewKey, key):
 		m.openKeyFormModal(true)
-		return m, m.focusNewKeyField(newKeyFieldTTL)
+		return m, m.focusNewKeyField(newKeyFieldType)
 	case m.matchAction(actionBrowserMoreKeys, key):
 		if m.ScanCursor != 0 {
 			m.Loading = true
@@ -816,9 +819,8 @@ func (m *Model) handleBrowserKeys(key string, msg tea.KeyMsg) (tea.Model, tea.Cm
 			sec = m.Config.GetRefreshIntervalSec()
 		}
 		m.EditMode = editRefreshInterval
-		m.EditInput.SetValue(strconv.Itoa(sec))
-		m.EditInput.Placeholder = "seconds (0=off, min 5)"
-		m.EditInput.Focus()
+		m.RefreshIntervalCursor = refreshIntervalCursor(sec)
+		m.blurEditInputs()
 		m.PrevScreen = ScreenBrowser
 		m.Screen = ScreenKeyEdit
 	case m.matchAction(actionBrowserSortOrder, key):
@@ -927,7 +929,7 @@ func (m *Model) startEdit() (tea.Model, tea.Cmd) {
 	switch m.KeyDetail.Meta.Type {
 	case "string", "hash", "list", "set", "zset", "stream":
 		m.openKeyFormModal(false)
-		return m, m.focusNewKeyField(newKeyFieldTTL)
+		return m, m.focusNewKeyField(newKeyFieldKey)
 	default:
 		m.ErrMsg = fmt.Sprintf("type %s is not editable", m.KeyDetail.Meta.Type)
 		m.statusClearGen++
@@ -988,10 +990,10 @@ func (m *Model) setKeyFormType(keyType string) {
 }
 
 func (m *Model) keyFormFieldOrder() []int {
-	if m.EditMode == editExistingKey {
-		return []int{newKeyFieldTTL, newKeyFieldKey, newKeyFieldValue}
+	if m.EditMode == editNewKey {
+		return []int{newKeyFieldType, newKeyFieldKey, newKeyFieldTTL, newKeyFieldValue}
 	}
-	return []int{newKeyFieldTTL, newKeyFieldType, newKeyFieldKey, newKeyFieldValue}
+	return []int{newKeyFieldKey, newKeyFieldTTL, newKeyFieldValue}
 }
 
 func (m *Model) nextKeyFormField(current, delta int) int {
@@ -1040,6 +1042,27 @@ func (m *Model) updateTTLModalInputs(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m, cmd
 }
 
+func (m *Model) updateRefreshIntervalModal(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	key := msg.String()
+	switch {
+	case m.matchAction(actionSave, key) || key == "enter":
+		return m.submitRefreshInterval()
+	case m.matchAction(actionBrowserUp, key):
+		m.RefreshIntervalCursor = (m.RefreshIntervalCursor - 1 + len(refreshIntervalChoices)) % len(refreshIntervalChoices)
+		return m, nil
+	case m.matchAction(actionBrowserDown, key):
+		m.RefreshIntervalCursor = (m.RefreshIntervalCursor + 1) % len(refreshIntervalChoices)
+		return m, nil
+	}
+	return m, nil
+}
+
+func (m *Model) submitRefreshInterval() (tea.Model, tea.Cmd) {
+	sec := refreshIntervalChoices[m.RefreshIntervalCursor]
+	m.Loading = true
+	return m, saveRefreshInterval(m.Config, sec)
+}
+
 func (m *Model) submitTTLModal() (tea.Model, tea.Cmd) {
 	ttl, err := store.ParseTTLInput(m.NewKeyTTL.Value())
 	if err != nil {
@@ -1059,14 +1082,14 @@ func (m *Model) openKeyFormModal(isNew bool) {
 		m.NewKeyTTL.SetValue("")
 		m.NewKeyName.SetValue("")
 		m.NewKeyValue.Reset()
-		m.NewKeyFocus = newKeyFieldTTL
+		m.NewKeyFocus = newKeyFieldType
 	} else {
 		m.EditMode = editExistingKey
 		m.setKeyFormType(m.KeyDetail.Meta.Type)
 		m.NewKeyTTL.SetValue(ttlInputValue(m.KeyDetail.Meta.TTL))
 		m.NewKeyName.SetValue(m.SelectedKey)
 		m.NewKeyValue.SetValue(store.EncodeKeyBody(m.KeyDetail))
-		m.NewKeyFocus = newKeyFieldTTL
+		m.NewKeyFocus = newKeyFieldKey
 	}
 	m.NewKeyValue.Placeholder = keyFormValuePlaceholder(m.KeyFormType)
 	configureNewKeyTextarea(&m.NewKeyValue)
@@ -1113,7 +1136,10 @@ func (m *Model) focusNewKeyField(field int) tea.Cmd {
 	case newKeyFieldKey:
 		return m.NewKeyName.Focus()
 	case newKeyFieldValue:
-		return m.NewKeyValue.Focus()
+		focusCmd := m.NewKeyValue.Focus()
+		var moveCmd tea.Cmd
+		m.NewKeyValue, moveCmd = m.NewKeyValue.Update(tea.KeyMsg{Type: tea.KeyCtrlHome})
+		return tea.Batch(focusCmd, moveCmd)
 	}
 	return nil
 }

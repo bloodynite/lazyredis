@@ -254,6 +254,10 @@ func (m *Model) editCtrlEnterSaveCancelHint() string {
 	return m.saveCancelHint(actionSave)
 }
 
+func (m *Model) editEnterSaveHint() string {
+	return "enter save" + "   " + m.bindHint(actionEditEsc, "cancel")
+}
+
 func (m *Model) keyFormModalHint() string {
 	if m.EditMode == editNewKey && m.NewKeyFocus == newKeyFieldType {
 		return strings.Join([]string{
@@ -507,6 +511,13 @@ func (m *Model) keyEditDefs() []bindDef {
 			}, defs...)
 		}
 		return defs
+	case editRefreshInterval:
+		return []bindDef{
+			{actionBrowserUp, "up", scopeKeyEdit},
+			{actionBrowserDown, "down", scopeKeyEdit},
+			{actionSave, "save", scopeKeyEdit},
+			{actionEditEsc, "cancel", scopeKeyEdit},
+		}
 	default:
 		return []bindDef{
 			{actionSave, "save", scopeKeyEdit},

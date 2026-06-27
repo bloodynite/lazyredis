@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"strings"
 	"time"
 
 	"github.com/charmbracelet/bubbles/spinner"
@@ -9,6 +10,12 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/bloodynite/lazyredis/internal/config"
 	"github.com/bloodynite/lazyredis/internal/store"
+)
+
+const (
+	keyPanelModalMaxLines   = 12
+	keyPanelInlineCharLimit = 4096
+	keyPanelCharLimit       = 1 << 20
 )
 
 type Screen int
@@ -66,6 +73,8 @@ const (
 
 var keyFormTypes = []string{"string", "hash", "list", "set", "zset", "stream"}
 
+var refreshIntervalChoices = []int{0, 5, 10, 15, 30, 60}
+
 type Model struct {
 	Width  int
 	Height int
@@ -117,6 +126,8 @@ type Model struct {
 	EditInput    textinput.Model
 	EditField    string
 	EditNewType  string
+
+	RefreshIntervalCursor int
 
 	NewKeyTTL    textinput.Model
 	NewKeyName   textinput.Model
@@ -172,7 +183,7 @@ func New() *Model {
 	newKeyName := newFormInput("my:key")
 	newKeyValue := textarea.New()
 	newKeyValue.Placeholder = "value"
-	newKeyValue.CharLimit = 10000
+	newKeyValue.CharLimit = keyPanelCharLimit
 	configureNewKeyTextarea(&newKeyValue)
 	newKeyValue.SetWidth(40)
 	newKeyValue.SetHeight(6)
@@ -206,6 +217,29 @@ func newFormInput(placeholder string) textinput.Model {
 	ti.CharLimit = 256
 	ti.Width = 40
 	return ti
+}
+
+func refreshIntervalCursor(sec int) int {
+	for i, v := range refreshIntervalChoices {
+		if v == sec {
+			return i
+		}
+	}
+	return 0
+}
+
+func (m *Model) isKeyBodyTooLargeForKeyPanel() bool {
+	if m.KeyDetail == nil {
+		return false
+	}
+	body := store.EncodeKeyBody(m.KeyDetail)
+	if strings.Count(body, "\n") >= keyPanelModalMaxLines {
+		return true
+	}
+	if len(body) > keyPanelInlineCharLimit {
+		return true
+	}
+	return false
 }
 
 func (m *Model) Init() tea.Cmd {

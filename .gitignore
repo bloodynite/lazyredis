@@ -1,4 +1,5 @@
 /lazyredis
+/main
 /redis-tui
 test/certs/
 test/keys/
@@ -6,3 +7,4 @@ test/profiles.generated.yaml
 test/ssh/authorized_keys
 # Local AI runtime state
 .atl/
+.lsp_logs.txt

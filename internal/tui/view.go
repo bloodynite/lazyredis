@@ -2,7 +2,9 @@ package tui
 
 import (
 	"fmt"
+	"math"
 	"runtime/debug"
+	"strconv"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -13,6 +15,82 @@ import (
 	"github.com/mattn/go-runewidth"
 )
 
+func formatUptime(seconds string) string {
+	sec, err := strconv.ParseInt(seconds, 10, 64)
+	if err != nil || sec < 0 {
+		return seconds + "s"
+	}
+	const (
+		minute = 60
+		hour   = minute * 60
+		day    = hour * 24
+		week   = day * 7
+		month  = day * 30
+		year   = day * 365
+	)
+
+	var major, minor string
+	var majorVal, minorSec int64
+
+	switch {
+	case sec >= year:
+		majorVal = sec / year
+		minorSec = sec % year
+		major = fmt.Sprintf("%dy", majorVal)
+		if minorSec >= month {
+			minor = fmt.Sprintf("%dmo", minorSec/month)
+		} else if minorSec >= week {
+			minor = fmt.Sprintf("%dw", minorSec/week)
+		} else if minorSec >= day {
+			minor = fmt.Sprintf("%dd", minorSec/day)
+		}
+	case sec >= month:
+		majorVal = sec / month
+		minorSec = sec % month
+		major = fmt.Sprintf("%dmo", majorVal)
+		if minorSec >= week {
+			minor = fmt.Sprintf("%dw", minorSec/week)
+		} else if minorSec >= day {
+			minor = fmt.Sprintf("%dd", minorSec/day)
+		}
+	case sec >= week:
+		majorVal = sec / week
+		minorSec = sec % week
+		major = fmt.Sprintf("%dw", majorVal)
+		if minorSec >= day {
+			minor = fmt.Sprintf("%dd", minorSec/day)
+		}
+	case sec >= day:
+		majorVal = sec / day
+		minorSec = sec % day
+		major = fmt.Sprintf("%dd", majorVal)
+		if minorSec >= hour {
+			minor = fmt.Sprintf("%dh", minorSec/hour)
+		}
+	case sec >= hour:
+		majorVal = sec / hour
+		minorSec = sec % hour
+		major = fmt.Sprintf("%dh", majorVal)
+		if minorSec >= minute {
+			minor = fmt.Sprintf("%dm", minorSec/minute)
+		}
+	case sec >= minute:
+		majorVal = sec / minute
+		minorSec = sec % minute
+		major = fmt.Sprintf("%dm", majorVal)
+		if minorSec > 0 {
+			minor = fmt.Sprintf("%ds", minorSec)
+		}
+	default:
+		return fmt.Sprintf("%ds", sec)
+	}
+
+	if minor == "" {
+		return major
+	}
+	return major + minor
+}
+
 func (m *Model) View() string {
 	if m.Width == 0 {
 		return "Loading..."
@@ -22,7 +100,7 @@ func (m *Model) View() string {
 	if m.Client != nil {
 		switch m.Screen {
 		case ScreenKeyEdit:
-			if m.editUsesModal() {
+			if m.editUsesModal() && !m.editExistingKeyNeedsFullScreen() {
 				out = m.viewBrowserWithEditModal()
 			} else {
 				out = m.viewBrowserWithBodyOverlay(m.viewKeyEdit())
@@ -168,7 +246,7 @@ func (m *Model) renderInfoLine2() string {
 				"clients " + m.Info.Connected,
 				"ops/s " + m.Info.OpsPerSec,
 				m.Info.Role,
-				"uptime " + m.Info.Uptime + "s",
+				"uptime " + formatUptime(m.Info.Uptime),
 				"auto " + m.autoRefreshLabel(),
 			}, "  ·  ")
 		}
@@ -199,10 +277,16 @@ func (m *Model) autoRefreshLabel() string {
 	return fmt.Sprintf("%ds %s", sec, refreshBar(time.Since(m.RefreshStartedAt), sec))
 }
 
+func barCells(intervalSec int) int {
+	return 10
+}
+
 func refreshBar(elapsed time.Duration, intervalSec int) string {
-	const width = 10
+	const filledRune = "■"
+	const emptyRune = "□"
+	width := barCells(intervalSec)
 	if intervalSec <= 0 {
-		return strings.Repeat("▢", width)
+		return strings.Repeat(emptyRune, width)
 	}
 	if elapsed < 0 {
 		elapsed = 0
@@ -211,17 +295,11 @@ func refreshBar(elapsed time.Duration, intervalSec int) string {
 	if progress > 1 {
 		progress = 1
 	}
-	filled := int(progress * float64(width))
-	if filled > width {
-		filled = width
-	}
+	filled := int(math.Round(progress * float64(width)))
 	if filled <= 0 {
-		return strings.Repeat("▢", width)
+		return strings.Repeat(emptyRune, width)
 	}
-	if filled >= width {
-		return strings.Repeat("▣", width)
-	}
-	return strings.Repeat("▣", filled) + strings.Repeat("▢", width-filled)
+	return strings.Repeat(filledRune, filled) + strings.Repeat(emptyRune, width-filled)
 }
 
 func (m *Model) browserPanelWidths() (left, right int) {
@@ -683,12 +761,18 @@ func (m *Model) viewKeyEdit() string {
 		title = "Add item"
 	case editTTL:
 		title = "TTL for: " + m.SelectedKey
-	case editRefreshInterval:
-		title = "Auto refresh interval (seconds, 0=off)"
+	case editExistingKey:
+		title = "Edit key"
+	default:
+		title = "Edit"
 	}
 	if (m.EditMode == editElement || m.EditMode == editElementAdd) && m.elementEditUsesTextarea() {
 		m.syncNewKeyLayout()
 		return subtitleStyle.Render(title) + "\n" + m.NewKeyValue.View() + "\n" + confirmHintStyle.Render(m.editCtrlEnterSaveCancelHint())
+	}
+	if m.EditMode == editExistingKey && m.editExistingKeyNeedsFullScreen() {
+		m.syncNewKeyLayout()
+		return m.renderKeyEditFullScreen()
 	}
 	hint := confirmHintStyle.Render(m.editEnterSaveCancelHint())
 	if m.EditMode == editElement || m.EditMode == editElementAdd {
@@ -701,6 +785,10 @@ func (m *Model) editUsesModal() bool {
 	return m.EditMode == editNewKey || m.EditMode == editExistingKey || m.EditMode == editRefreshInterval || m.EditMode == editTTL
 }
 
+func (m *Model) editExistingKeyNeedsFullScreen() bool {
+	return m.EditMode == editExistingKey && m.isKeyBodyTooLargeForKeyPanel()
+}
+
 func (m *Model) renderEditModal() string {
 	if m.EditMode == editNewKey || m.EditMode == editExistingKey {
 		return m.renderKeyFormModal()
@@ -708,11 +796,47 @@ func (m *Model) renderEditModal() string {
 	if m.EditMode == editTTL {
 		return m.renderTTLModal()
 	}
-	inner := panelTitleStyle.Render("Auto refresh") + "\n\n" +
-		m.EditInput.View() + "\n\n" +
-		confirmHintStyle.Render(m.editEnterSaveCancelHint())
-	width := min(56, max(36, lipgloss.Width(m.EditInput.View())+8))
+	if m.EditMode == editRefreshInterval {
+		return m.renderRefreshIntervalModal()
+	}
+	return ""
+}
+
+func (m *Model) renderRefreshIntervalModal() string {
+	var lines []string
+	lines = append(lines, panelTitleStyle.Render("Auto refresh"))
+	lines = append(lines, "")
+	lines = append(lines, m.renderRefreshIntervalChoices()...)
+	lines = append(lines, "")
+	lines = append(lines, confirmHintStyle.Render(m.editEnterSaveHint()))
+	inner := strings.Join(lines, "\n")
+	width := min(40, max(20, m.Width-4))
 	return confirmModalStyle.Width(width).Render(inner)
+}
+
+func (m *Model) renderRefreshIntervalChoices() []string {
+	lines := make([]string, 0, len(refreshIntervalChoices))
+	cur := m.RefreshIntervalCursor
+	if cur < 0 || cur >= len(refreshIntervalChoices) {
+		cur = 0
+	}
+	for i, sec := range refreshIntervalChoices {
+		label := fmt.Sprintf("%ds", sec)
+		if sec == 0 {
+			label = "off"
+		}
+		prefix := "    "
+		if i == cur {
+			prefix = "  ▸ "
+		}
+		line := prefix + label
+		if i == cur {
+			lines = append(lines, selectedStyle.Render(line))
+		} else {
+			lines = append(lines, normalStyle.Render(line))
+		}
+	}
+	return lines
 }
 
 func (m *Model) renderTTLModal() string {
@@ -736,12 +860,6 @@ func (m *Model) renderKeyFormModal() string {
 	lines = append(lines, panelTitleStyle.Render(title))
 	lines = append(lines, "")
 
-	ttlPrefix := "  "
-	if m.NewKeyFocus == newKeyFieldTTL {
-		ttlPrefix = "▸ "
-	}
-	lines = append(lines, fmt.Sprintf("%sTTL: %s", ttlPrefix, m.NewKeyTTL.View()))
-
 	typePrefix := "  "
 	if m.NewKeyFocus == newKeyFieldType {
 		typePrefix = "▸ "
@@ -759,6 +877,12 @@ func (m *Model) renderKeyFormModal() string {
 	}
 	lines = append(lines, fmt.Sprintf("%sKey: %s", keyPrefix, m.NewKeyName.View()))
 
+	ttlPrefix := "  "
+	if m.NewKeyFocus == newKeyFieldTTL {
+		ttlPrefix = "▸ "
+	}
+	lines = append(lines, fmt.Sprintf("%sTTL: %s", ttlPrefix, m.NewKeyTTL.View()))
+
 	valuePrefix := "  "
 	if m.NewKeyFocus == newKeyFieldValue {
 		valuePrefix = "▸ "
@@ -771,6 +895,20 @@ func (m *Model) renderKeyFormModal() string {
 	inner := strings.Join(lines, "\n")
 	width := min(70, max(48, m.Width*2/3))
 	return confirmModalStyle.Width(width).Render(inner)
+}
+
+func (m *Model) renderKeyEditFullScreen() string {
+	var lines []string
+	lines = append(lines, subtitleStyle.Render("Edit key"))
+	lines = append(lines, "")
+	lines = append(lines, fmt.Sprintf("  Type: %s", m.KeyFormType))
+	lines = append(lines, fmt.Sprintf("  Key: %s", m.NewKeyName.View()))
+	lines = append(lines, fmt.Sprintf("  TTL: %s", m.NewKeyTTL.View()))
+	lines = append(lines, "")
+	lines = append(lines, "  "+keyFormValueLabel(m.KeyFormType)+":")
+	lines = append(lines, m.NewKeyValue.View())
+	lines = append(lines, "", confirmHintStyle.Render(m.keyFormModalHint()))
+	return strings.Join(lines, "\n")
 }
 
 func (m *Model) renderKeyTypeSelector() []string {
@@ -811,6 +949,10 @@ func (m *Model) syncNewKeyLayout() {
 	if m.Width == 0 {
 		return
 	}
+	if m.editExistingKeyNeedsFullScreen() {
+		m.syncNewKeyLayoutFullScreen()
+		return
+	}
 	if m.elementEditUsesTextarea() {
 		m.syncNewKeyLayoutBodyOverlay()
 		return
@@ -833,6 +975,19 @@ func (m *Model) syncNewKeyLayoutModal() {
 	m.NewKeyName.Width = inputW
 	m.NewKeyValue.SetWidth(inputW)
 	m.NewKeyValue.SetHeight(m.newKeyValueHeight())
+}
+
+func (m *Model) syncNewKeyLayoutFullScreen() {
+	inputW := min(80, max(36, m.Width-8))
+	m.NewKeyTTL.Width = inputW
+	m.NewKeyName.Width = inputW
+	m.NewKeyValue.SetWidth(m.Width - 2)
+	available := m.panelAreaLines()
+	h := available - 9
+	if h < 4 {
+		h = 4
+	}
+	m.NewKeyValue.SetHeight(h)
 }
 
 func (m *Model) newKeyValueHeight() int {
@@ -878,29 +1033,49 @@ func (m *Model) applyHelpOverlay(base string) string {
 
 func (m *Model) renderHelpModal() string {
 	groups := m.helpGroups()
+	width := min(90, max(56, m.Width*3/4))
+	innerWidth := width - 6
+	colWidth := innerWidth/2 - 2
+
 	var lines []string
 	lines = append(lines, panelTitleStyle.Render("Keyboard shortcuts"))
 	lines = append(lines, "")
+
 	for _, g := range groups {
 		if g.Title != "" {
 			lines = append(lines, helpGroupTitleStyle.Render(g.Title))
 		}
-		for _, def := range g.Defs {
-			lines = append(lines, fmt.Sprintf("  %-16s %s", formatBindKeys(m.bindKeys(def.id)), def.desc))
+		defs := g.Defs
+		for i := 0; i < len(defs); i += 2 {
+			ld := defs[i]
+			left := fmt.Sprintf("%-12s %s", formatBindKeys(m.bindKeys(ld.id)), ld.desc)
+			var right string
+			if i+1 < len(defs) {
+				rd := defs[i+1]
+				right = fmt.Sprintf("%-12s %s", formatBindKeys(m.bindKeys(rd.id)), rd.desc)
+			}
+			paddedLeft := left + strings.Repeat(" ", max(0, colWidth-lipgloss.Width(left)))
+			if right != "" {
+				lines = append(lines, "  "+paddedLeft+"  "+right)
+			} else {
+				lines = append(lines, "  "+left)
+			}
 		}
 		lines = append(lines, "")
 	}
+
 	if len(lines) > 0 && lines[len(lines)-1] == "" {
 		lines = lines[:len(lines)-1]
 	}
+
 	lines = append(lines, "",
 		confirmHintStyle.Render("Customize shortcut modifier with settings.shortcut_modifier"),
 		confirmHintStyle.Render("Use ctrl or alt"),
 		"",
 		confirmHintStyle.Render("Press ? or esc to close"),
 	)
+
 	inner := strings.Join(lines, "\n")
-	width := min(72, max(48, m.Width*2/3))
 	return confirmModalStyle.Width(width).Render(inner)
 }
 
