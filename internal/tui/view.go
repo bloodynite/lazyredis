@@ -100,7 +100,7 @@ func (m *Model) View() string {
 	if m.Client != nil {
 		switch m.Screen {
 		case ScreenKeyEdit:
-			if m.editUsesModal() {
+			if m.editUsesModal() && !m.editExistingKeyNeedsFullScreen() {
 				out = m.viewBrowserWithEditModal()
 			} else {
 				out = m.viewBrowserWithBodyOverlay(m.viewKeyEdit())
@@ -761,12 +761,18 @@ func (m *Model) viewKeyEdit() string {
 		title = "Add item"
 	case editTTL:
 		title = "TTL for: " + m.SelectedKey
+	case editExistingKey:
+		title = "Edit key"
 	default:
 		title = "Edit"
 	}
 	if (m.EditMode == editElement || m.EditMode == editElementAdd) && m.elementEditUsesTextarea() {
 		m.syncNewKeyLayout()
 		return subtitleStyle.Render(title) + "\n" + m.NewKeyValue.View() + "\n" + confirmHintStyle.Render(m.editCtrlEnterSaveCancelHint())
+	}
+	if m.EditMode == editExistingKey && m.editExistingKeyNeedsFullScreen() {
+		m.syncNewKeyLayout()
+		return m.renderKeyEditFullScreen()
 	}
 	hint := confirmHintStyle.Render(m.editEnterSaveCancelHint())
 	if m.EditMode == editElement || m.EditMode == editElementAdd {
@@ -777,6 +783,10 @@ func (m *Model) viewKeyEdit() string {
 
 func (m *Model) editUsesModal() bool {
 	return m.EditMode == editNewKey || m.EditMode == editExistingKey || m.EditMode == editRefreshInterval || m.EditMode == editTTL
+}
+
+func (m *Model) editExistingKeyNeedsFullScreen() bool {
+	return m.EditMode == editExistingKey && m.isKeyBodyTooLargeForKeyPanel()
 }
 
 func (m *Model) renderEditModal() string {
@@ -887,6 +897,20 @@ func (m *Model) renderKeyFormModal() string {
 	return confirmModalStyle.Width(width).Render(inner)
 }
 
+func (m *Model) renderKeyEditFullScreen() string {
+	var lines []string
+	lines = append(lines, subtitleStyle.Render("Edit key"))
+	lines = append(lines, "")
+	lines = append(lines, fmt.Sprintf("  TTL: %s", m.NewKeyTTL.View()))
+	lines = append(lines, fmt.Sprintf("  Type: %s", m.KeyFormType))
+	lines = append(lines, fmt.Sprintf("  Key: %s", m.NewKeyName.View()))
+	lines = append(lines, "")
+	lines = append(lines, "  "+keyFormValueLabel(m.KeyFormType)+":")
+	lines = append(lines, m.NewKeyValue.View())
+	lines = append(lines, "", confirmHintStyle.Render(m.keyFormModalHint()))
+	return strings.Join(lines, "\n")
+}
+
 func (m *Model) renderKeyTypeSelector() []string {
 	lines := make([]string, 0, len(keyFormTypes))
 	for i, t := range keyFormTypes {
@@ -925,6 +949,10 @@ func (m *Model) syncNewKeyLayout() {
 	if m.Width == 0 {
 		return
 	}
+	if m.editExistingKeyNeedsFullScreen() {
+		m.syncNewKeyLayoutFullScreen()
+		return
+	}
 	if m.elementEditUsesTextarea() {
 		m.syncNewKeyLayoutBodyOverlay()
 		return
@@ -947,6 +975,19 @@ func (m *Model) syncNewKeyLayoutModal() {
 	m.NewKeyName.Width = inputW
 	m.NewKeyValue.SetWidth(inputW)
 	m.NewKeyValue.SetHeight(m.newKeyValueHeight())
+}
+
+func (m *Model) syncNewKeyLayoutFullScreen() {
+	inputW := min(80, max(36, m.Width-8))
+	m.NewKeyTTL.Width = inputW
+	m.NewKeyName.Width = inputW
+	m.NewKeyValue.SetWidth(m.Width - 2)
+	available := m.panelAreaLines()
+	h := available - 9
+	if h < 4 {
+		h = 4
+	}
+	m.NewKeyValue.SetHeight(h)
 }
 
 func (m *Model) newKeyValueHeight() int {

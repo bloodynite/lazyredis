@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"strings"
 	"time"
 
 	"github.com/charmbracelet/bubbles/spinner"
@@ -9,6 +10,12 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/bloodynite/lazyredis/internal/config"
 	"github.com/bloodynite/lazyredis/internal/store"
+)
+
+const (
+	keyPanelModalMaxLines   = 12
+	keyPanelInlineCharLimit = 4096
+	keyPanelCharLimit       = 1 << 20
 )
 
 type Screen int
@@ -176,7 +183,7 @@ func New() *Model {
 	newKeyName := newFormInput("my:key")
 	newKeyValue := textarea.New()
 	newKeyValue.Placeholder = "value"
-	newKeyValue.CharLimit = 10000
+	newKeyValue.CharLimit = keyPanelCharLimit
 	configureNewKeyTextarea(&newKeyValue)
 	newKeyValue.SetWidth(40)
 	newKeyValue.SetHeight(6)
@@ -219,6 +226,20 @@ func refreshIntervalCursor(sec int) int {
 		}
 	}
 	return 0
+}
+
+func (m *Model) isKeyBodyTooLargeForKeyPanel() bool {
+	if m.KeyDetail == nil {
+		return false
+	}
+	body := store.EncodeKeyBody(m.KeyDetail)
+	if strings.Count(body, "\n") >= keyPanelModalMaxLines {
+		return true
+	}
+	if len(body) > keyPanelInlineCharLimit {
+		return true
+	}
+	return false
 }
 
 func (m *Model) Init() tea.Cmd {
