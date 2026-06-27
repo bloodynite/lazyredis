@@ -804,7 +804,7 @@ func (m *Model) handleBrowserKeys(key string, msg tea.KeyMsg) (tea.Model, tea.Cm
 		m.SearchInput.Focus()
 	case m.matchAction(actionBrowserNewKey, key):
 		m.openKeyFormModal(true)
-		return m, m.focusNewKeyField(newKeyFieldTTL)
+		return m, m.focusNewKeyField(newKeyFieldType)
 	case m.matchAction(actionBrowserMoreKeys, key):
 		if m.ScanCursor != 0 {
 			m.Loading = true
@@ -929,7 +929,7 @@ func (m *Model) startEdit() (tea.Model, tea.Cmd) {
 	switch m.KeyDetail.Meta.Type {
 	case "string", "hash", "list", "set", "zset", "stream":
 		m.openKeyFormModal(false)
-		return m, m.focusNewKeyField(newKeyFieldTTL)
+		return m, m.focusNewKeyField(newKeyFieldKey)
 	default:
 		m.ErrMsg = fmt.Sprintf("type %s is not editable", m.KeyDetail.Meta.Type)
 		m.statusClearGen++
@@ -1082,14 +1082,14 @@ func (m *Model) openKeyFormModal(isNew bool) {
 		m.NewKeyTTL.SetValue("")
 		m.NewKeyName.SetValue("")
 		m.NewKeyValue.Reset()
-		m.NewKeyFocus = newKeyFieldTTL
+		m.NewKeyFocus = newKeyFieldType
 	} else {
 		m.EditMode = editExistingKey
 		m.setKeyFormType(m.KeyDetail.Meta.Type)
 		m.NewKeyTTL.SetValue(ttlInputValue(m.KeyDetail.Meta.TTL))
 		m.NewKeyName.SetValue(m.SelectedKey)
 		m.NewKeyValue.SetValue(store.EncodeKeyBody(m.KeyDetail))
-		m.NewKeyFocus = newKeyFieldTTL
+		m.NewKeyFocus = newKeyFieldKey
 	}
 	m.NewKeyValue.Placeholder = keyFormValuePlaceholder(m.KeyFormType)
 	configureNewKeyTextarea(&m.NewKeyValue)

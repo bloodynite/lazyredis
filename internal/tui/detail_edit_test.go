@@ -1265,3 +1265,57 @@ func TestKeyFormFieldOrderPerMode(t *testing.T) {
 		}
 	}
 }
+
+func TestStartEditInitialFocusIsKey(t *testing.T) {
+	m := New()
+	m.Width = 120
+	m.Height = 24
+	m.Client = &store.Client{}
+	m.SelectedKey = "demo:key"
+	m.KeyDetail = &store.KeyDetail{
+		Meta:   store.KeyMeta{Key: "demo:key", Type: "string"},
+		String: "hi",
+	}
+
+	next, _ := m.startEdit()
+	m = next.(*Model)
+
+	if m.NewKeyFocus != newKeyFieldKey {
+		t.Fatalf("initial focus = %d, want newKeyFieldKey (%d)", m.NewKeyFocus, newKeyFieldKey)
+	}
+	if !m.NewKeyName.Focused() {
+		t.Fatal("expected NewKeyName (key name input) to be focused")
+	}
+	if m.NewKeyTTL.Focused() {
+		t.Fatal("NewKeyTTL should not be focused on initial open")
+	}
+	if m.NewKeyValue.Focused() {
+		t.Fatal("NewKeyValue should not be focused on initial open")
+	}
+}
+
+func TestNewKeyFormInitialFocusIsType(t *testing.T) {
+	m := New()
+	m.Width = 120
+	m.Height = 24
+	m.Client = &store.Client{}
+
+	m.openKeyFormModal(true)
+	_ = m.focusNewKeyField(newKeyFieldType)
+
+	if m.NewKeyFocus != newKeyFieldType {
+		t.Fatalf("initial focus = %d, want newKeyFieldType (%d)", m.NewKeyFocus, newKeyFieldType)
+	}
+	if m.EditMode != editNewKey {
+		t.Fatalf("EditMode = %v, want editNewKey", m.EditMode)
+	}
+	if m.NewKeyTTL.Focused() {
+		t.Fatal("NewKeyTTL should not be focused on initial open")
+	}
+	if m.NewKeyName.Focused() {
+		t.Fatal("NewKeyName should not be focused on initial open")
+	}
+	if m.NewKeyValue.Focused() {
+		t.Fatal("NewKeyValue should not be focused on initial open")
+	}
+}
