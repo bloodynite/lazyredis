@@ -307,16 +307,22 @@ Context actions (`copy`, `edit`, `delete`, `ttl`, `g`) are pinned on the keybar 
 
 Modal fields (top to bottom):
 
-1. **TTL** — empty, seconds (`300`), duration (`1h`), or `persist` / `-` for no expiry
-2. **Type** — `string`, `hash`, `list`, `set`, `zset`, `stream` (list with `↑`/`↓` when focused)
-3. **Key** — key name
+1. **Type** — `string`, `hash`, `list`, `set`, `zset`, `stream` (list with `↑`/`↓` when focused)
+2. **Key** — key name
+3. **TTL** — empty, seconds (`300`), duration (`1h`), or `persist` / `-` for no expiry
 4. **Value** — body format depends on type (scrollable textarea)
+
+Initial focus lands on **Type**. Tab cycles `Type → Key → TTL → Value`. Type is interactive (j/k to change) only in new-key mode; in edit mode it is read-only.
 
 Save with `{modifier}+S`.
 
 ### Edit key (`e`)
 
-From the **Keys** panel: opens the full key modal (same as new key), pre-filled. Available for **string**, **hash**, **list**, **set**, **zset**, **stream**.
+From the **Keys** panel: opens the key editor, pre-filled. Available for **string**, `hash`, `list`, `set`, `zset`, `stream`.
+
+Initial focus lands on **Key** (Type is read-only here, so the first editable field is Key).
+
+For very large values (>12 lines or >4 KB), the editor opens as a **full-screen overlay** instead of a modal so you can see and edit the whole body. The cursor lands at the start of the value.
 
 Saving **replaces the entire key** (delete + recreate) and applies TTL. Changing the key name renames by writing the new key and deleting the old one.
 
