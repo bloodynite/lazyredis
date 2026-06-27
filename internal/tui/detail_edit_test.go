@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/bubbles/textarea"
@@ -1082,6 +1083,62 @@ func TestViewKeyEditDispatchesFullScreenForLargeBody(t *testing.T) {
 	}
 	if !strings.Contains(out, "Type:") {
 		t.Fatalf("view should expose Type field for full-screen edit, got:\n%s", out)
+	}
+}
+
+func TestKeyFormModalPutsTypeBeforeTTL(t *testing.T) {
+	m := New()
+	m.Width = 120
+	m.Height = 24
+	m.Client = &store.Client{}
+	m.SelectedKey = "demo:key"
+	m.KeyDetail = &store.KeyDetail{
+		Meta:   store.KeyMeta{Key: "demo:key", Type: "string", TTL: 300 * time.Second},
+		String: "hi",
+	}
+	m.EditMode = editExistingKey
+	m.NewKeyFocus = newKeyFieldTTL
+	if _, cmd := m.startEdit(); cmd != nil {
+		_ = cmd
+	}
+	m.syncNewKeyLayout()
+
+	out := m.renderKeyFormModal()
+	typeIdx := strings.Index(out, "Type:")
+	ttlIdx := strings.Index(out, "TTL:")
+	if typeIdx < 0 || ttlIdx < 0 {
+		t.Fatalf("modal missing Type or TTL marker; out:\n%s", out)
+	}
+	if typeIdx > ttlIdx {
+		t.Fatalf("expected Type before TTL, got Type@%d TTL@%d\n%s", typeIdx, ttlIdx, out)
+	}
+}
+
+func TestKeyEditFullScreenPutsTypeBeforeTTL(t *testing.T) {
+	m := New()
+	m.Width = 120
+	m.Height = 24
+	m.Client = &store.Client{}
+	m.SelectedKey = "demo:big"
+	m.KeyDetail = &store.KeyDetail{
+		Meta:   store.KeyMeta{Key: "demo:big", Type: "string", TTL: 300 * time.Second},
+		String: strings.Repeat("x", 5000),
+	}
+	m.EditMode = editExistingKey
+	m.NewKeyFocus = newKeyFieldTTL
+	if _, cmd := m.startEdit(); cmd != nil {
+		_ = cmd
+	}
+	m.syncNewKeyLayout()
+
+	out := m.renderKeyEditFullScreen()
+	typeIdx := strings.Index(out, "Type:")
+	ttlIdx := strings.Index(out, "TTL:")
+	if typeIdx < 0 || ttlIdx < 0 {
+		t.Fatalf("full-screen missing Type or TTL marker; out:\n%s", out)
+	}
+	if typeIdx > ttlIdx {
+		t.Fatalf("expected Type before TTL, got Type@%d TTL@%d\n%s", typeIdx, ttlIdx, out)
 	}
 }
 

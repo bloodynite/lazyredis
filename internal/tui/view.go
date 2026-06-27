@@ -860,12 +860,6 @@ func (m *Model) renderKeyFormModal() string {
 	lines = append(lines, panelTitleStyle.Render(title))
 	lines = append(lines, "")
 
-	ttlPrefix := "  "
-	if m.NewKeyFocus == newKeyFieldTTL {
-		ttlPrefix = "▸ "
-	}
-	lines = append(lines, fmt.Sprintf("%sTTL: %s", ttlPrefix, m.NewKeyTTL.View()))
-
 	typePrefix := "  "
 	if m.NewKeyFocus == newKeyFieldType {
 		typePrefix = "▸ "
@@ -876,6 +870,12 @@ func (m *Model) renderKeyFormModal() string {
 	} else {
 		lines = append(lines, fmt.Sprintf("%sType: %s", typePrefix, m.KeyFormType))
 	}
+
+	ttlPrefix := "  "
+	if m.NewKeyFocus == newKeyFieldTTL {
+		ttlPrefix = "▸ "
+	}
+	lines = append(lines, fmt.Sprintf("%sTTL: %s", ttlPrefix, m.NewKeyTTL.View()))
 
 	keyPrefix := "  "
 	if m.NewKeyFocus == newKeyFieldKey {
@@ -901,8 +901,8 @@ func (m *Model) renderKeyEditFullScreen() string {
 	var lines []string
 	lines = append(lines, subtitleStyle.Render("Edit key"))
 	lines = append(lines, "")
-	lines = append(lines, fmt.Sprintf("  TTL: %s", m.NewKeyTTL.View()))
 	lines = append(lines, fmt.Sprintf("  Type: %s", m.KeyFormType))
+	lines = append(lines, fmt.Sprintf("  TTL: %s", m.NewKeyTTL.View()))
 	lines = append(lines, fmt.Sprintf("  Key: %s", m.NewKeyName.View()))
 	lines = append(lines, "")
 	lines = append(lines, "  "+keyFormValueLabel(m.KeyFormType)+":")
