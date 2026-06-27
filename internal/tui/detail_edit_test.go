@@ -1084,3 +1084,43 @@ func TestViewKeyEditDispatchesFullScreenForLargeBody(t *testing.T) {
 		t.Fatalf("view should expose Type field for full-screen edit, got:\n%s", out)
 	}
 }
+
+func TestFocusNewKeyValueMovesCursorToStartForMultiLine(t *testing.T) {
+	m := New()
+	m.NewKeyValue.SetValue(strings.Repeat("a\n", 30))
+	if line := m.NewKeyValue.Line(); line == 0 {
+		t.Fatalf("SetValue should leave cursor on last line, got row %d", line)
+	}
+
+	cmd := m.focusNewKeyField(newKeyFieldValue)
+	if cmd == nil {
+		t.Fatal("expected focus command batch")
+	}
+	if line := m.NewKeyValue.Line(); line != 0 {
+		t.Fatalf("expected cursor on row 0 after focus, got %d", line)
+	}
+}
+
+func TestFocusNewKeyValueMovesCursorToStartForSingleLineLong(t *testing.T) {
+	m := New()
+	long := strings.Repeat("x", 5000)
+	m.NewKeyValue.SetValue(long)
+	if line := m.NewKeyValue.Line(); line != 0 {
+		t.Fatalf("single-line value should keep cursor on row 0, got %d", line)
+	}
+	beforeLen := m.NewKeyValue.Length()
+	if beforeLen != 5000 {
+		t.Fatalf("textarea length = %d, want 5000", beforeLen)
+	}
+
+	cmd := m.focusNewKeyField(newKeyFieldValue)
+	if cmd == nil {
+		t.Fatal("expected focus command batch")
+	}
+	if line := m.NewKeyValue.Line(); line != 0 {
+		t.Fatalf("expected cursor on row 0 after focus, got %d", line)
+	}
+	if m.NewKeyValue.Length() != 5000 {
+		t.Fatalf("focus must not change value length, got %d", m.NewKeyValue.Length())
+	}
+}

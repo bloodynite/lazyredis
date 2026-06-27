@@ -1136,7 +1136,10 @@ func (m *Model) focusNewKeyField(field int) tea.Cmd {
 	case newKeyFieldKey:
 		return m.NewKeyName.Focus()
 	case newKeyFieldValue:
-		return m.NewKeyValue.Focus()
+		focusCmd := m.NewKeyValue.Focus()
+		var moveCmd tea.Cmd
+		m.NewKeyValue, moveCmd = m.NewKeyValue.Update(tea.KeyMsg{Type: tea.KeyCtrlHome})
+		return tea.Batch(focusCmd, moveCmd)
 	}
 	return nil
 }
