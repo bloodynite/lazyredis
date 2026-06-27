@@ -36,13 +36,13 @@ Edit key modal with TTL, type, and value fields:
 
 ## Install
 
-Quick install (downloads the release binary into `~/.local/bin`):
+Quick install (downloads the latest release binary into `~/.local/bin`):
 
 ```bash
 ./install.sh
 ```
 
-Override the install location and version:
+Override the install location and pin a version:
 
 ```bash
 INSTALL_VERSION=v0.2.0 INSTALL_DIR=/usr/local/bin ./install.sh
@@ -58,6 +58,12 @@ Then run:
 
 ```bash
 lazyredis
+```
+
+Check the installed version:
+
+```bash
+lazyredis --version
 ```
 
 From source:
