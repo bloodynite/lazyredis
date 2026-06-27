@@ -36,22 +36,50 @@ Edit key modal with TTL, type, and value fields:
 
 ## Install
 
-Quick install (downloads the latest release binary into `~/.local/bin`):
+### One-line install (no Go required)
+
+Downloads a prebuilt release binary for your OS/arch into `~/.local/bin` and verifies its SHA256 against the published `SHA256SUMS`:
 
 ```bash
-./install.sh
+curl -fsSL https://raw.githubusercontent.com/bloodynite/lazyredis/main/install.sh | sh
 ```
 
-Override the install location and pin a version:
+Pin a specific version and install system-wide:
 
 ```bash
-INSTALL_VERSION=v0.2.0 INSTALL_DIR=/usr/local/bin ./install.sh
+curl -fsSL https://raw.githubusercontent.com/bloodynite/lazyredis/main/install.sh | INSTALL_VERSION=v0.2.0 INSTALL_DIR=/usr/local/bin sh
 ```
 
-From a release tag directly:
+The script is POSIX `sh` and detects OS/arch from `uname`. Supported targets:
+
+| OS | Arch |
+|----|-------|
+| linux | amd64, arm64 |
+| darwin | amd64, arm64 |
+
+For windows, download `lazyredis-windows-amd64.exe` from the [releases page](https://github.com/bloodynite/lazyredis/releases).
+
+### From a local checkout
+
+```bash
+./install.sh                       # latest release into ~/.local/bin
+INSTALL_VERSION=v0.2.0 ./install.sh
+INSTALL_DIR=/usr/local/bin ./install.sh
+```
+
+### With Go
 
 ```bash
 go install github.com/bloodynite/lazyredis/cmd/lazyredis@v0.2.0
+```
+
+### From source
+
+```bash
+git clone https://github.com/bloodynite/lazyredis.git
+cd lazyredis
+go build -o lazyredis ./cmd/lazyredis
+./lazyredis
 ```
 
 Then run:
@@ -64,15 +92,6 @@ Check the installed version:
 
 ```bash
 lazyredis --version
-```
-
-From source:
-
-```bash
-git clone https://github.com/bloodynite/lazyredis.git
-cd lazyredis
-go build -o lazyredis ./cmd/lazyredis
-./lazyredis
 ```
 
 On first launch, a default config is created at `~/.config/lazyredis/profiles.yaml`.
