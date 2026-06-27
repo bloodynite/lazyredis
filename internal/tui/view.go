@@ -3,7 +3,6 @@ package tui
 import (
 	"fmt"
 	"math"
-	"runtime/debug"
 	"strconv"
 	"strings"
 	"time"
@@ -11,6 +10,7 @@ import (
 
 	"github.com/bloodynite/lazyredis/internal/config"
 	"github.com/bloodynite/lazyredis/internal/store"
+	"github.com/bloodynite/lazyredis/internal/version"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/mattn/go-runewidth"
 )
@@ -1080,10 +1080,7 @@ func (m *Model) renderHelpModal() string {
 }
 
 func appVersion() string {
-	if bi, ok := debug.ReadBuildInfo(); ok && bi.Main.Version != "" && bi.Main.Version != "(devel)" {
-		return bi.Main.Version
-	}
-	return "dev"
+	return version.String()
 }
 
 func appHeaderPrefix() string {
