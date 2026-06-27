@@ -45,13 +45,13 @@ Quick install (downloads the release binary into `~/.local/bin`):
 Override the install location and version:
 
 ```bash
-INSTALL_VERSION=v0.1.0 INSTALL_DIR=/usr/local/bin ./install.sh
+INSTALL_VERSION=v0.2.0 INSTALL_DIR=/usr/local/bin ./install.sh
 ```
 
 From a release tag directly:
 
 ```bash
-go install github.com/bloodynite/lazyredis/cmd/lazyredis@v0.1.0
+go install github.com/bloodynite/lazyredis/cmd/lazyredis@v0.2.0
 ```
 
 Then run:

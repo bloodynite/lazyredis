@@ -2,7 +2,7 @@
 set -euo pipefail
 
 INSTALL_DIR="${INSTALL_DIR:-$HOME/.local/bin}"
-INSTALL_VERSION="${INSTALL_VERSION:-v0.1.0}"
+INSTALL_VERSION="${INSTALL_VERSION:-v0.2.0}"
 PKG="github.com/bloodynite/lazyredis/cmd/lazyredis"
 BIN_NAME="lazyredis"
 
