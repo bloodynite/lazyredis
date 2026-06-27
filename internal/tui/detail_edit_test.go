@@ -1181,3 +1181,87 @@ func TestFocusNewKeyValueMovesCursorToStartForSingleLineLong(t *testing.T) {
 		t.Fatalf("focus must not change value length, got %d", m.NewKeyValue.Length())
 	}
 }
+
+func TestKeyFormModalFieldOrder(t *testing.T) {
+	m := New()
+	m.Width = 120
+	m.Height = 24
+	m.Client = &store.Client{}
+	m.SelectedKey = "demo:key"
+	m.KeyDetail = &store.KeyDetail{
+		Meta:   store.KeyMeta{Key: "demo:key", Type: "string", TTL: 300 * time.Second},
+		String: "hi",
+	}
+	m.EditMode = editExistingKey
+	m.NewKeyFocus = newKeyFieldTTL
+	if _, cmd := m.startEdit(); cmd != nil {
+		_ = cmd
+	}
+	m.syncNewKeyLayout()
+
+	out := m.renderKeyFormModal()
+	typeIdx := strings.Index(out, "Type:")
+	keyIdx := strings.Index(out, "Key:")
+	ttlIdx := strings.Index(out, "TTL:")
+	valueIdx := strings.Index(out, "Value:")
+	if typeIdx < 0 || keyIdx < 0 || ttlIdx < 0 || valueIdx < 0 {
+		t.Fatalf("modal missing one of Type/Key/TTL/Value markers; out:\n%s", out)
+	}
+	if !(typeIdx < keyIdx && keyIdx < ttlIdx && ttlIdx < valueIdx) {
+		t.Fatalf("expected order Type < Key < TTL < Value, got Type@%d Key@%d TTL@%d Value@%d\n%s",
+			typeIdx, keyIdx, ttlIdx, valueIdx, out)
+	}
+}
+
+func TestKeyEditFullScreenFieldOrder(t *testing.T) {
+	m := New()
+	m.Width = 120
+	m.Height = 24
+	m.Client = &store.Client{}
+	m.SelectedKey = "demo:big"
+	m.KeyDetail = &store.KeyDetail{
+		Meta:   store.KeyMeta{Key: "demo:big", Type: "string", TTL: 300 * time.Second},
+		String: strings.Repeat("x", 5000),
+	}
+	m.EditMode = editExistingKey
+	m.NewKeyFocus = newKeyFieldTTL
+	if _, cmd := m.startEdit(); cmd != nil {
+		_ = cmd
+	}
+	m.syncNewKeyLayout()
+
+	out := m.renderKeyEditFullScreen()
+	typeIdx := strings.Index(out, "Type:")
+	keyIdx := strings.Index(out, "Key:")
+	ttlIdx := strings.Index(out, "TTL:")
+	valueIdx := strings.Index(out, "Value:")
+	if typeIdx < 0 || keyIdx < 0 || ttlIdx < 0 || valueIdx < 0 {
+		t.Fatalf("full-screen missing one of Type/Key/TTL/Value markers; out:\n%s", out)
+	}
+	if !(typeIdx < keyIdx && keyIdx < ttlIdx && ttlIdx < valueIdx) {
+		t.Fatalf("expected order Type < Key < TTL < Value, got Type@%d Key@%d TTL@%d Value@%d\n%s",
+			typeIdx, keyIdx, ttlIdx, valueIdx, out)
+	}
+}
+
+func TestKeyFormFieldOrderPerMode(t *testing.T) {
+	cases := []struct {
+		mode editMode
+		want []int
+	}{
+		{editNewKey, []int{newKeyFieldType, newKeyFieldKey, newKeyFieldTTL, newKeyFieldValue}},
+		{editExistingKey, []int{newKeyFieldKey, newKeyFieldTTL, newKeyFieldValue}},
+	}
+	for _, tc := range cases {
+		m := &Model{EditMode: tc.mode}
+		order := m.keyFormFieldOrder()
+		if len(order) != len(tc.want) {
+			t.Fatalf("mode %v: order length = %d, want %d (order=%v)", tc.mode, len(order), len(tc.want), order)
+		}
+		for i := range tc.want {
+			if order[i] != tc.want[i] {
+				t.Fatalf("mode %v: order[%d] = %d, want %d (order=%v)", tc.mode, i, order[i], tc.want[i], order)
+			}
+		}
+	}
+}

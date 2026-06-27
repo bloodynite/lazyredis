@@ -990,10 +990,10 @@ func (m *Model) setKeyFormType(keyType string) {
 }
 
 func (m *Model) keyFormFieldOrder() []int {
-	if m.EditMode == editExistingKey {
-		return []int{newKeyFieldTTL, newKeyFieldKey, newKeyFieldValue}
+	if m.EditMode == editNewKey {
+		return []int{newKeyFieldType, newKeyFieldKey, newKeyFieldTTL, newKeyFieldValue}
 	}
-	return []int{newKeyFieldTTL, newKeyFieldType, newKeyFieldKey, newKeyFieldValue}
+	return []int{newKeyFieldKey, newKeyFieldTTL, newKeyFieldValue}
 }
 
 func (m *Model) nextKeyFormField(current, delta int) int {
