@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"runtime"
 	"sort"
 	"strconv"
 	"strings"
@@ -1501,6 +1502,11 @@ func writeSystemClipboard(text string) error {
 			return nil
 		}
 	}
+	if runtime.GOOS == "darwin" {
+		if err := writeClipboardPbcopy(text); err == nil {
+			return nil
+		}
+	}
 	if err := writeClipboardWlCopy(text); err == nil {
 		return nil
 	}
@@ -1510,7 +1516,17 @@ func writeSystemClipboard(text string) error {
 	return writeClipboardOSC52(text)
 }
 
-func writeClipboardWlCopy(text string) error {
+var writeClipboardPbcopy = func(text string) error {
+	path, err := exec.LookPath("pbcopy")
+	if err != nil {
+		return err
+	}
+	cmd := exec.Command(path)
+	cmd.Stdin = strings.NewReader(text)
+	return cmd.Run()
+}
+
+var writeClipboardWlCopy = func(text string) error {
 	path, err := exec.LookPath("wl-copy")
 	if err != nil {
 		return err
@@ -1520,7 +1536,7 @@ func writeClipboardWlCopy(text string) error {
 	return cmd.Run()
 }
 
-func writeClipboardXClip(text string) error {
+var writeClipboardXClip = func(text string) error {
 	path, err := exec.LookPath("xclip")
 	if err != nil {
 		return err
@@ -1530,7 +1546,7 @@ func writeClipboardXClip(text string) error {
 	return cmd.Run()
 }
 
-func writeClipboardOSC52(text string) error {
+var writeClipboardOSC52 = func(text string) error {
 	seq := osc52.New(text)
 	if os.Getenv("TMUX") != "" {
 		seq = seq.Tmux()
