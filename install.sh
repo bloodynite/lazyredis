@@ -63,7 +63,7 @@ case "$uname_s" in
     Linux*)                asset_os=linux ;;
     Darwin*)               asset_os=darwin ;;
     FreeBSD*)              asset_os=freebsd ;;
-    MINGW*|MSYS*|CYGWIN*)  die "windows: please use scoop, winget or download the .exe from $REPO/releases" ;;
+    MINGW*|MSYS*|CYGWIN*)  die "windows: use the PowerShell installer (install.ps1) or download the .exe from $REPO/releases" ;;
     *)                     die "unsupported operating system: $uname_s" ;;
 esac
 

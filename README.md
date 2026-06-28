@@ -57,7 +57,29 @@ The script is POSIX `sh` and detects OS/arch from `uname`. Supported targets:
 | linux | amd64, arm64 |
 | darwin | amd64, arm64 |
 
-For windows, download `lazyredis-windows-amd64.exe` from the [releases page](https://github.com/bloodynite/lazyredis/releases).
+### Windows (PowerShell)
+
+Downloads the Windows release binary, verifies SHA256, and installs to `%LOCALAPPDATA%\Programs\lazyredis` (no admin required). Adds the install directory to your user `PATH`.
+
+```powershell
+iwr -useb https://raw.githubusercontent.com/bloodynite/lazyredis/main/install.ps1 | iex
+```
+
+Pin a specific version:
+
+```powershell
+$env:LAZYREDIS_VERSION='v0.2.0'; iwr -useb https://raw.githubusercontent.com/bloodynite/lazyredis/main/install.ps1 | iex
+```
+
+Or install from a local checkout:
+
+```powershell
+.\install.ps1                                # latest release
+.\install.ps1 -Version v0.2.0                # pinned
+.\install.ps1 -InstallDir C:\Tools\lazyredis # custom location
+```
+
+Manual install: download `lazyredis-windows-amd64.exe` from the [releases page](https://github.com/bloodynite/lazyredis/releases) and place it somewhere on your `PATH`.
 
 ### From a local checkout
 
