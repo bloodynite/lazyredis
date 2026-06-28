@@ -47,7 +47,7 @@ curl -fsSL https://raw.githubusercontent.com/bloodynite/lazyredis/main/install.s
 Pin a specific version and install system-wide:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/bloodynite/lazyredis/main/install.sh | INSTALL_VERSION=v0.2.0 INSTALL_DIR=/usr/local/bin sh
+curl -fsSL https://raw.githubusercontent.com/bloodynite/lazyredis/main/install.sh | INSTALL_VERSION=v0.2.1 INSTALL_DIR=/usr/local/bin sh
 ```
 
 The script is POSIX `sh` and detects OS/arch from `uname`. Supported targets:
@@ -68,14 +68,14 @@ iwr -useb https://raw.githubusercontent.com/bloodynite/lazyredis/main/install.ps
 Pin a specific version:
 
 ```powershell
-$env:LAZYREDIS_VERSION='v0.2.0'; iwr -useb https://raw.githubusercontent.com/bloodynite/lazyredis/main/install.ps1 | iex
+$env:LAZYREDIS_VERSION='v0.2.1'; iwr -useb https://raw.githubusercontent.com/bloodynite/lazyredis/main/install.ps1 | iex
 ```
 
 Or install from a local checkout:
 
 ```powershell
 .\install.ps1                                # latest release
-.\install.ps1 -Version v0.2.0                # pinned
+.\install.ps1 -Version v0.2.1                # pinned
 .\install.ps1 -InstallDir C:\Tools\lazyredis # custom location
 ```
 
@@ -85,14 +85,14 @@ Manual install: download `lazyredis-windows-amd64.exe` from the [releases page](
 
 ```bash
 ./install.sh                       # latest release into ~/.local/bin
-INSTALL_VERSION=v0.2.0 ./install.sh
+INSTALL_VERSION=v0.2.1 ./install.sh
 INSTALL_DIR=/usr/local/bin ./install.sh
 ```
 
 ### With Go
 
 ```bash
-go install github.com/bloodynite/lazyredis/cmd/lazyredis@v0.2.0
+go install github.com/bloodynite/lazyredis/cmd/lazyredis@v0.2.1
 ```
 
 ### From source

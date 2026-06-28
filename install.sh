@@ -4,7 +4,7 @@
 #
 # Environment overrides:
 #   INSTALL_DIR      destination directory (default: $HOME/.local/bin)
-#   INSTALL_VERSION  release tag (default: latest, e.g. v0.2.0)
+#   INSTALL_VERSION  release tag (default: latest, e.g. v0.2.1)
 
 set -eu
 
