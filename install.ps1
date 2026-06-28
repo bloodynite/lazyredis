@@ -10,7 +10,7 @@ user-writable directory (no admin required). Adds the install directory
 to the user PATH for the current and future sessions.
 
 .PARAMETER Version
-Release tag (e.g. v0.2.0). Default: latest. Falls back to the
+Release tag (e.g. v0.2.1). Default: latest. Falls back to the
 LAZYREDIS_VERSION environment variable.
 
 .PARAMETER InstallDir
@@ -21,10 +21,10 @@ Falls back to the LAZYREDIS_INSTALL_DIR environment variable.
 iwr -useb https://raw.githubusercontent.com/bloodynite/lazyredis/main/install.ps1 | iex
 
 .EXAMPLE
-$env:LAZYREDIS_VERSION='v0.2.0'; iwr -useb https://raw.githubusercontent.com/bloodynite/lazyredis/main/install.ps1 | iex
+$env:LAZYREDIS_VERSION='v0.2.1'; iwr -useb https://raw.githubusercontent.com/bloodynite/lazyredis/main/install.ps1 | iex
 
 .EXAMPLE
-.\install.ps1 -Version v0.2.0 -InstallDir C:\Tools\lazyredis
+.\install.ps1 -Version v0.2.1 -InstallDir C:\Tools\lazyredis
 #>
 [CmdletBinding()]
 param(
