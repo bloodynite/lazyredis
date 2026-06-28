@@ -5,6 +5,7 @@ test/certs/
 test/keys/
 test/profiles.generated.yaml
 test/ssh/authorized_keys
+sdd/
 # Local AI runtime state
 .atl/
 .lsp_logs.txt
