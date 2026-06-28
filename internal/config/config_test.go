@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 )
 
@@ -76,6 +77,9 @@ func TestUpsertAndDelete(t *testing.T) {
 }
 
 func TestDirCreatesUnderHome(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.Skip("requires linux HOME layout")
+	}
 	dir := t.TempDir()
 	t.Setenv("HOME", dir)
 
@@ -90,6 +94,9 @@ func TestDirCreatesUnderHome(t *testing.T) {
 }
 
 func TestMigrateFromLegacyConfig(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.Skip("requires linux HOME layout")
+	}
 	dir := t.TempDir()
 	t.Setenv("HOME", dir)
 

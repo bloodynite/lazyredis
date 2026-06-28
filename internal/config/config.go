@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 
 	"gopkg.in/yaml.v3"
@@ -84,11 +85,22 @@ func legacyDir() (string, error) {
 }
 
 func Dir() (string, error) {
+	base, err := configBase()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(base, configDirName), nil
+}
+
+func configBase() (string, error) {
+	if runtime.GOOS == "windows" || runtime.GOOS == "darwin" {
+		return os.UserConfigDir()
+	}
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return "", err
 	}
-	return filepath.Join(home, ".config", configDirName), nil
+	return filepath.Join(home, ".config"), nil
 }
 
 func migrateConfigIfNeeded() error {
