@@ -16,12 +16,12 @@ Edit key modal with TTL, type, and value fields:
 
 - **Connection profiles** with standalone, cluster, and sentinel modes
 - **Advanced connectivity**: TLS/SSL, SSH tunnel, HTTP proxy, SOCKS5 proxy
-- Two-panel browser: key list (1/5 width) + detail view (4/5 width)
-- Live key filter with `SCAN` (substring or glob pattern)
+- Two-panel browser: key list + detail view (default 1/5–4/5 split; narrows to 1/4–3/4 on tight screens)
+- Live key filter with `SCAN` (plain text substring by default; glob patterns supported)
 - **Paginated key loading** (`g`) for large databases
 - Create and edit keys: **string**, **hash**, **list**, **set**, **zset**, **stream**
 - **Detail panel CRUD**: add, edit, or delete individual hash fields, list items, set members, zset scores, stream entries
-- **Copy value to system clipboard** (`c`) — uses `wl-copy`, `xclip`, or terminal OSC 52
+- **Copy value to system clipboard** (`c`) — uses `pbcopy` (macOS), `wl-copy`, `xclip`, or terminal OSC 52
 - TTL editing in a modal (`t`); persist (no expiry)
 - Auto-refresh (default 5s, configurable)
 - Fixed **server info bar** (2 rows) + **status line** for messages + **keybar** (up to 2 rows)
@@ -31,7 +31,7 @@ Edit key modal with TTL, type, and value fields:
 
 ## Requirements
 
-- Go 1.25+
+- Go 1.25.0
 - A running Redis instance (or cluster/sentinel setup)
 
 ## Install
@@ -116,7 +116,7 @@ Check the installed version:
 lazyredis --version
 ```
 
-On first launch, a default config is created at `~/.config/lazyredis/profiles.yaml`.
+On first launch, a default config is created at `~/.config/lazyredis/profiles.yaml` (Linux) or `~/Library/Application Support/lazyredis/profiles.yaml` (macOS) or `%AppData%\lazyredis\profiles.yaml` (Windows).
 
 ## Contributing
 
@@ -132,7 +132,13 @@ MIT — see [LICENSE](LICENSE).
 
 ## Configuration
 
-Config path: `~/.config/lazyredis/profiles.yaml`
+Config path (per OS):
+
+| OS | Path |
+|----|------|
+| Linux | `~/.config/lazyredis/profiles.yaml` |
+| macOS | `~/Library/Application Support/lazyredis/profiles.yaml` |
+| Windows | `%AppData%\lazyredis\profiles.yaml` |
 
 ### Example
 
@@ -326,7 +332,7 @@ The tables below describe default behavior. Save shortcuts use `settings.shortcu
 | `?` | Help |
 | `ctrl+c` | Force quit |
 
-**Filter:** plain text matches as substring (`*texto*`); use `:` and `*` for glob patterns (e.g. `user:*`, `demo:*`).
+**Filter:** plain text matches as substring (`*texto*`); use glob chars like `*` or `?` for patterns (e.g. `user:*`, `demo:*`).
 
 **Pagination:** initial load returns up to 100 keys per batch. When more keys exist, the Keys panel footer shows `loaded/total · g` and `g` loads the next page.
 
@@ -388,7 +394,7 @@ For composite types, navigate items with `j`/`k` and:
 
 ### Copy (`c`)
 
-Copies the current value to the **system clipboard** (paste anywhere with `Ctrl+V`). On Linux/Wayland uses `wl-copy` when available; falls back to `xclip` or terminal OSC 52. Shows `copied to clipboard` in the status line for 3 seconds.
+Copies the current value to the **system clipboard** (paste anywhere with `Ctrl+V`). On macOS uses `pbcopy` first; on Linux/Wayland uses `wl-copy` when available; otherwise falls back to `xclip` or terminal OSC 52. Shows `copied to clipboard` in the status line for 3 seconds.
 
 ### Value format by type
 
