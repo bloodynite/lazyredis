@@ -991,9 +991,13 @@ func (m *Model) syncNewKeyLayoutFullScreen() {
 }
 
 func (m *Model) newKeyValueHeight() int {
-	h := m.browserContentHeight() / 2
-	if h < 4 {
-		h = 4
+	overhead := 12
+	if m.EditMode == editNewKey && m.NewKeyFocus == newKeyFieldType {
+		overhead += len(keyFormTypes) - 1
+	}
+	h := m.panelAreaLines() - overhead
+	if h < 3 {
+		h = 3
 	}
 	if h > 12 {
 		h = 12
