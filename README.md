@@ -1,16 +1,28 @@
 # lazyredis
 
+[![Go](https://img.shields.io/badge/Go-1.25.0-00ADD8?logo=go&logoColor=white)](https://go.dev/) [![License](https://img.shields.io/github/license/bloodynite/lazyredis)](LICENSE) [![Bubble Tea](https://img.shields.io/badge/UI-Bubble%20Tea-ffb3cc?logo=go&logoColor=white)](https://github.com/charmbracelet/bubbletea)
+
+[![Linux](https://img.shields.io/badge/Linux-supported-555555?logo=linux&logoColor=white)](https://www.linux.org/) [![macOS](https://img.shields.io/badge/macOS-supported-666666?logo=apple&logoColor=white)](https://www.apple.com/macos/) [![Windows](https://img.shields.io/badge/Windows-supported-777777?logo=windows&logoColor=white)](https://www.microsoft.com/windows)
+
 Terminal UI for browsing and editing Redis keys. Built with [Bubble Tea](https://github.com/charmbracelet/bubbletea).
 
 ## Screenshots
 
 Browser connected to a local profile, browsing `demos:*` keys across Redis types:
 
-![Browser with demo keys](docs/screenshots/browser-demos-keys.png)
+![Browser with demo keys](docs/screenshots/browser.png)
 
 Edit key modal with TTL, type, and value fields:
 
 ![Edit key modal](docs/screenshots/edit-key-modal.png)
+
+New key modal with the type selector, key, TTL, and value fields:
+
+![New key modal](docs/screenshots/new-key-modal.png)
+
+Connection profile panel for standalone, cluster, and sentinel modes:
+
+![Profile panel](docs/screenshots/profile-panel.png)
 
 ## Features
 
@@ -36,30 +48,32 @@ Edit key modal with TTL, type, and value fields:
 
 ## Install
 
-### One-line install (no Go required)
+Choose the path that matches your environment.
 
-Downloads a prebuilt release binary for your OS/arch into `~/.local/bin` and verifies its SHA256 against the published `SHA256SUMS`:
+### Linux / macOS release binary
+
+Installs the latest prebuilt binary into `~/.local/bin` and verifies SHA256 against the published `SHA256SUMS`:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/bloodynite/lazyredis/main/install.sh | sh
 ```
 
-Pin a specific version and install system-wide:
+Pin a version or install system-wide:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/bloodynite/lazyredis/main/install.sh | INSTALL_VERSION=v0.2.1 INSTALL_DIR=/usr/local/bin sh
 ```
 
-The script is POSIX `sh` and detects OS/arch from `uname`. Supported targets:
+The POSIX `sh` script detects OS/arch from `uname`. Supported targets:
 
 | OS | Arch |
 |----|-------|
 | linux | amd64, arm64 |
 | darwin | amd64, arm64 |
 
-### Windows (PowerShell)
+### Windows release binary
 
-Downloads the Windows release binary, verifies SHA256, and installs to `%LOCALAPPDATA%\Programs\lazyredis` (no admin required). Adds the install directory to your user `PATH`.
+Installs the Windows release binary to `%LOCALAPPDATA%\Programs\lazyredis`, verifies SHA256, and adds the install directory to your user `PATH`.
 
 ```powershell
 iwr -useb https://raw.githubusercontent.com/bloodynite/lazyredis/main/install.ps1 | iex
@@ -71,7 +85,7 @@ Pin a specific version:
 $env:LAZYREDIS_VERSION='v0.2.1'; iwr -useb https://raw.githubusercontent.com/bloodynite/lazyredis/main/install.ps1 | iex
 ```
 
-Or install from a local checkout:
+Run from a local checkout:
 
 ```powershell
 .\install.ps1                                # latest release
@@ -79,9 +93,9 @@ Or install from a local checkout:
 .\install.ps1 -InstallDir C:\Tools\lazyredis # custom location
 ```
 
-Manual install: download `lazyredis-windows-amd64.exe` from the [releases page](https://github.com/bloodynite/lazyredis/releases) and place it somewhere on your `PATH`.
+Manual install: download `lazyredis-windows-amd64.exe` from the [releases page](https://github.com/bloodynite/lazyredis/releases) and place it on your `PATH`.
 
-### From a local checkout
+### Local install script
 
 ```bash
 ./install.sh                       # latest release into ~/.local/bin
@@ -89,13 +103,13 @@ INSTALL_VERSION=v0.2.1 ./install.sh
 INSTALL_DIR=/usr/local/bin ./install.sh
 ```
 
-### With Go
+### Go install
 
 ```bash
 go install github.com/bloodynite/lazyredis/cmd/lazyredis@v0.2.1
 ```
 
-### From source
+### Build from source
 
 ```bash
 git clone https://github.com/bloodynite/lazyredis.git
@@ -104,7 +118,7 @@ go build -o lazyredis ./cmd/lazyredis
 ./lazyredis
 ```
 
-Then run:
+Run lazyredis:
 
 ```bash
 lazyredis
@@ -116,19 +130,7 @@ Check the installed version:
 lazyredis --version
 ```
 
-On first launch, a default config is created at `~/.config/lazyredis/profiles.yaml` (Linux) or `~/Library/Application Support/lazyredis/profiles.yaml` (macOS) or `%AppData%\lazyredis\profiles.yaml` (Windows).
-
-## Contributing
-
-Contributions are welcome. See [CONTRIBUTING.md](CONTRIBUTING.md).
-
-- Default branch for releases: `main`
-- Integration branch: `develop`
-- Open PRs against `develop` unless it is a hotfix for `main`
-
-## License
-
-MIT — see [LICENSE](LICENSE).
+On first launch, lazyredis creates a default config file. See [Configuration](#configuration).
 
 ## Configuration
 
@@ -334,7 +336,7 @@ The tables below describe default behavior. Save shortcuts use `settings.shortcu
 
 **Filter:** plain text matches as substring (`*texto*`); use glob chars like `*` or `?` for patterns (e.g. `user:*`, `demo:*`).
 
-**Pagination:** initial load returns up to 100 keys per batch. When more keys exist, the Keys panel footer shows `loaded/total · g` and `g` loads the next page.
+**Pagination:** Keys are fetched with Redis `SCAN` in 100-key batches. When more keys remain, the Keys footer shows `loaded/total · g` for `*` scans, or `loaded · g` for filtered scans, and `g` loads more keys.
 
 Context actions (`copy`, `edit`, `delete`, `ttl`, `g`) are pinned on the keybar when relevant.
 
@@ -500,3 +502,15 @@ Skip integration tests in short mode:
 ```bash
 go test -short ./...
 ```
+
+## Contributing
+
+Contributions are welcome. See [CONTRIBUTING.md](CONTRIBUTING.md).
+
+- Default branch for releases: `main`
+- Integration branch: `develop`
+- Open PRs against `develop` unless it is a hotfix for `main`
+
+## License
+
+MIT — see [LICENSE](LICENSE).
