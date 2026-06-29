@@ -34,7 +34,12 @@ func overlayCenter(base, dialog string, width, height int) string {
 	dialogW := lipgloss.Width(dialog)
 	dialogH := lipgloss.Height(dialog)
 	startX := max(0, (width-dialogW)/2)
-	startY := max(0, (height-dialogH)/2)
+	var startY int
+	if dialogH >= height {
+		startY = height - dialogH
+	} else {
+		startY = (height - dialogH) / 2
+	}
 
 	lines := strings.Split(base, "\n")
 	for len(lines) < height {

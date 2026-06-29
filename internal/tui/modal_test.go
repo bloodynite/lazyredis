@@ -16,6 +16,39 @@ func TestOverlayCenterPlacesDialog(t *testing.T) {
 	}
 }
 
+func TestOverlayCenterAnchorsBottomWhenOverflowing(t *testing.T) {
+	base := strings.Repeat(".", 20)
+	dialog := "TOP\nA\nB\nC\nBOTTOM"
+	out := overlayCenter(base, dialog, 20, 3)
+	if !strings.Contains(out, "BOTTOM") {
+		t.Fatal("expected bottom line of dialog to remain visible when overflowing")
+	}
+}
+
+func TestNewKeyValueHeightShrinksWithTypeSelector(t *testing.T) {
+	m := New()
+	m.Width = 80
+	m.Height = 30
+	m.EditMode = editExistingKey
+	editH := m.newKeyValueHeight()
+
+	m.EditMode = editNewKey
+	m.NewKeyFocus = newKeyFieldKey
+	newH := m.newKeyValueHeight()
+	if newH != editH {
+		t.Fatalf("new key (selector closed) height = %d, want %d", newH, editH)
+	}
+
+	m.NewKeyFocus = newKeyFieldType
+	selectorH := m.newKeyValueHeight()
+	if selectorH >= newH {
+		t.Fatalf("textarea should shrink when type selector is open: selector=%d new=%d", selectorH, newH)
+	}
+	if selectorH < 3 {
+		t.Fatalf("textarea height must stay usable: got %d", selectorH)
+	}
+}
+
 func TestRenderConfirmModal(t *testing.T) {
 	m := New()
 	m.ConfirmAction = confirmDeleteKey
